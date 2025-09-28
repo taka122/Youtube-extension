@@ -1,5 +1,5 @@
 # YouTube: 再生前に「なぜ見るのか」入力
-English translation is available below.
+The English version/explanation is shown below.
 
 ## 日本語ガイド
 YouTube の視聴前に目的意識を促すためのユーザースクリプトです。動画の再生前に理由入力を求め、学習とそれ以外の視聴時間を自動で集計します。ショート動画のブロックや、任意の視聴時間制限など集中のためのオプションも備えています。
