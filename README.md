@@ -1,4 +1,4 @@
-YouTube 視聴目的ユーザースクリプト — 日本語ガイド
+#YouTube 視聴目的ユーザースクリプト — 日本語ガイド
 
 There is English Guide below
 
