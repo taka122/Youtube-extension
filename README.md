@@ -1,6 +1,6 @@
 YouTube 視聴目的ユーザースクリプト — 日本語ガイド
 
-there is English Guide below
+There is English Guide below
 
 動画の再生前に「なぜ観るのか？」の入力を求め、学習とそれ以外の視聴時間を自動集計。Shorts ブロックや任意の視聴上限で、集中を保つためのユーザースクリプトです。
 
