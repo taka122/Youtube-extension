@@ -19,6 +19,10 @@
     ENABLE_NON_LEARNING_LIMIT: false,
     // 学習以外の合計視聴許容時間（分）／1日
     NON_LEARNING_LIMIT_MIN: 30,
+    // 娯楽カテゴリの視聴時間を制限したい場合に true
+    ENABLE_ENTERTAINMENT_LIMIT: false,
+    // 娯楽カテゴリの視聴許容時間（分）／1日
+    ENTERTAINMENT_LIMIT_MIN: 30,
     // 理由テキストの最小文字数
     MIN_REASON_LEN: 5,
     // オーバーレイの最大幅(px)
@@ -111,21 +115,35 @@
       entry.totalSeconds += 1;
 
       const category = typeof tickingCategory === "string" ? tickingCategory : "その他";
+      const isLearning = category === "学習";
+      const isEntertainment = category === "娯楽";
 
-      if (category !== "学習") {
+      if (!isLearning) {
         entry.nonLearningSeconds += 1;
+      }
 
-        if (CONFIG.ENABLE_NON_LEARNING_LIMIT) {
-          const limitSec = CONFIG.NON_LEARNING_LIMIT_MIN * 60;
-          if (entry.nonLearningSeconds >= limitSec) {
-            pauseAllVideos();
-            showLimitModal();
-          }
+      if (isLearning) entry.learningSeconds += 1;
+      if (isEntertainment) entry.entertainmentSeconds += 1;
+
+      let limitHandled = false;
+
+      if (isEntertainment && CONFIG.ENABLE_ENTERTAINMENT_LIMIT) {
+        const limitSec = CONFIG.ENTERTAINMENT_LIMIT_MIN * 60;
+        if (entry.entertainmentSeconds >= limitSec) {
+          limitHandled = true;
+          pauseAllVideos();
+          showLimitModal("entertainment");
         }
       }
 
-      if (category === "学習") entry.learningSeconds += 1;
-      if (category === "娯楽") entry.entertainmentSeconds += 1;
+      if (!limitHandled && !isLearning && CONFIG.ENABLE_NON_LEARNING_LIMIT) {
+        const limitSec = CONFIG.NON_LEARNING_LIMIT_MIN * 60;
+        if (entry.nonLearningSeconds >= limitSec) {
+          limitHandled = true;
+          pauseAllVideos();
+          showLimitModal("non-learning");
+        }
+      }
 
       persistDailyStats();
       updateWatchOverlay(entry);
@@ -668,17 +686,18 @@
     modalEl = null;
   }
 
-  function showLimitModal() {
+  function showLimitModal(kind = "non-learning") {
     removeModal();
+    const isEntertainment = kind === "entertainment";
+    const bodyMessage = isEntertainment
+      ? "娯楽カテゴリの視聴時間が設定上限に達しました。<br>目的を持った動画だけを視聴するように切り替えましょう。"
+      : "学習以外の視聴時間が設定上限に達しました。<br>目的を持った「学習」動画のみ視聴できます。";
     const $back = document.createElement("div");
     $back.className = "yt-reason-backdrop";
     $back.innerHTML = `
       <div class="yt-reason-card">
         <div class="yt-reason-title">今日はここまで</div>
-        <div class="yt-limit-msg">
-          学習以外の視聴時間が設定上限に達しました。<br>
-          目的を持った「学習」動画のみ視聴できます。
-        </div>
+        <div class="yt-limit-msg">${bodyMessage}</div>
         <div class="yt-reason-actions" style="justify-content:center;margin-top:14px;">
           <button class="yt-btn" id="yt_limit_ok">OK</button>
         </div>
@@ -825,4 +844,1532 @@
   // 4) ページ離脱時にカウント終了
   window.addEventListener("beforeunload", stopTick);
 
+})();
+
+// === 【Daily Purpose on Home Patch】===
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "fg_daily_purpose_v1";
+  const STYLE_ID = "fg-purpose-style";
+  const MODAL_ID = "fg-purpose-modal";
+  const DISPLAY_ID = "fg-purpose-display";
+  const CHECK_INTERVAL = 2000;
+  const EDIT_BUTTON_TEXT = "目的を編集";
+
+  let modalEl = null;
+  let displayEl = null;
+  let tickTimer = null;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+
+  function init() {
+    injectStyles();
+    ensureTicker();
+    document.addEventListener("yt-navigate-start", handleRouteChange, true);
+    document.addEventListener("yt-navigate-finish", handleRouteChange, true);
+    document.addEventListener("yt-page-data-updated", handleRouteChange, true);
+    window.addEventListener("storage", (event) => {
+      if (event.key === STORAGE_KEY) {
+        refreshState();
+      }
+    });
+    refreshState();
+  }
+
+  function ensureTicker() {
+    if (tickTimer) return;
+    tickTimer = setInterval(refreshState, CHECK_INTERVAL);
+  }
+
+  function handleRouteChange() {
+    if (!isHome()) {
+      removeModal();
+      removeDisplay();
+    }
+    setTimeout(refreshState, 0);
+  }
+
+  function refreshState() {
+    if (!isHome()) {
+      removeModal();
+      removeDisplay();
+      return;
+    }
+    const payload = loadPurpose();
+    const today = todayKey();
+    const hasToday = payload && payload.date === today;
+    const text = hasToday ? String(payload.text || "") : "";
+    if (!hasToday || text.trim().length === 0) {
+      removeDisplay();
+      showModal({ mandatory: true, initialText: text });
+    } else {
+      removeModal();
+      updateDisplay(text);
+    }
+  }
+
+  function showModal(options = {}) {
+    const { mandatory = false, initialText = "" } = options;
+    if (!document.body) return;
+    if (modalEl && modalEl.isConnected) return;
+    removeModal();
+
+    const modal = document.createElement("div");
+    modal.id = MODAL_ID;
+    modal.className = "fg-purpose-backdrop";
+    modal.innerHTML = `
+      <div class="fg-purpose-card" role="dialog" aria-modal="true">
+        <h2>今日の目的を決めましょう</h2>
+        <p class="fg-purpose-sub">YouTubeを開いた理由や今日の達成目標を記入してください。</p>
+        <textarea class="fg-purpose-input" rows="4" placeholder="例: 〇〇の学習、〇〇の調査など"></textarea>
+        <div class="fg-purpose-actions">
+          ${mandatory ? "" : '<button type="button" class="fg-purpose-cancel">キャンセル</button>'}
+          <button type="button" class="fg-purpose-save" disabled>保存</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modalEl = modal;
+
+    if (!mandatory) {
+      modal.addEventListener("click", (ev) => {
+        if (ev.target === modal) {
+          removeModal();
+        }
+      });
+    }
+
+    const textarea = modal.querySelector(".fg-purpose-input");
+    const saveBtn = modal.querySelector(".fg-purpose-save");
+    const cancelBtn = modal.querySelector(".fg-purpose-cancel");
+
+    const payload = loadPurpose();
+    let prefill = initialText;
+    if (!prefill && payload && payload.date === todayKey()) {
+      prefill = payload.text || "";
+    }
+    textarea.value = prefill;
+    saveBtn.disabled = textarea.value.trim().length === 0;
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        removeModal();
+      });
+    }
+
+    textarea.addEventListener("input", () => {
+      saveBtn.disabled = textarea.value.trim().length === 0;
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const text = textarea.value.trim();
+      if (!text) return;
+      const payload = {
+        date: todayKey(),
+        text,
+        updatedAt: Date.now(),
+      };
+      savePurpose(payload);
+      removeModal();
+      updateDisplay(text);
+    });
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.select();
+    }, 0);
+  }
+
+  function removeModal() {
+    if (modalEl) {
+      modalEl.remove();
+      modalEl = null;
+    }
+  }
+
+  function updateDisplay(text) {
+    if (!document.body) return;
+    if (!isHome()) {
+      removeDisplay();
+      return;
+    }
+    let el = displayEl || document.getElementById(DISPLAY_ID);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = DISPLAY_ID;
+      el.className = "fg-purpose-display";
+      el.innerHTML = `
+        <div class="fg-purpose-text"></div>
+        <button type="button" class="fg-purpose-edit">${EDIT_BUTTON_TEXT}</button>
+      `;
+      document.body.appendChild(el);
+      displayEl = el;
+      const editBtn = el.querySelector(".fg-purpose-edit");
+      if (editBtn) {
+        editBtn.addEventListener("click", () => {
+          const payload = loadPurpose();
+          const today = todayKey();
+          let current = "";
+          if (payload && payload.date === today) {
+            current = String(payload.text || "");
+          } else {
+            const textEl = el.querySelector(".fg-purpose-text");
+            current = textEl ? textEl.textContent || "" : "";
+          }
+          showModal({ mandatory: false, initialText: current });
+        });
+      }
+    }
+    const textEl = el.querySelector(".fg-purpose-text");
+    if (textEl) {
+      textEl.textContent = text;
+    } else {
+      el.textContent = text;
+    }
+  }
+
+  function removeDisplay() {
+    if (displayEl) {
+      displayEl.remove();
+      displayEl = null;
+    } else {
+      const el = document.getElementById(DISPLAY_ID);
+      if (el) el.remove();
+    }
+  }
+
+  function isHome() {
+    const path = location.pathname || "";
+    return path === "/" || path === "";
+  }
+
+  function todayKey() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function loadPurpose() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== "object") return null;
+      if (typeof data.text !== "string" || typeof data.date !== "string") return null;
+      return {
+        date: data.date,
+        text: data.text,
+        updatedAt: Number(data.updatedAt) || 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function savePurpose(payload) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      /* ignore storage errors */
+    }
+  }
+
+  function injectStyles() {
+    const existing = document.getElementById(STYLE_ID);
+    if (existing) existing.remove();
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .fg-purpose-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 2147483647;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .fg-purpose-card {
+        width: min(92vw, 520px);
+        background: rgba(12, 14, 22, 0.95);
+        color: #f7f8fb;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+        padding: 24px 26px;
+      }
+      .fg-purpose-card h2 {
+        margin: 0 0 12px;
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .fg-purpose-sub {
+        margin: 0 0 16px;
+        font-size: 14px;
+        opacity: 0.82;
+        line-height: 1.6;
+      }
+      .fg-purpose-input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(20, 22, 33, 0.9);
+        color: inherit;
+        font-size: 16px;
+        resize: vertical;
+        min-height: 120px;
+      }
+      .fg-purpose-input:focus {
+        outline: none;
+        border-color: rgba(98, 146, 255, 0.8);
+        box-shadow: 0 0 0 2px rgba(98, 146, 255, 0.35);
+      }
+      .fg-purpose-actions {
+        margin-top: 18px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      .fg-purpose-save {
+        padding: 10px 18px;
+        border-radius: 12px;
+        border: none;
+        background: #2b5bd7;
+        color: #f2f5ff;
+        font-weight: 600;
+        font-size: 15px;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .fg-purpose-save:disabled {
+        background: #454a60;
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
+      .fg-purpose-save:not(:disabled):hover {
+        background: #3166f0;
+        transform: translateY(-1px);
+      }
+      .fg-purpose-cancel {
+        padding: 10px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(37, 41, 58, 0.8);
+        color: #f1f4ff;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .fg-purpose-cancel:hover {
+        background: rgba(52, 57, 78, 0.9);
+      }
+      .fg-purpose-display {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 2147483600;
+        color: rgba(245, 248, 255, 0.9);
+        font-size: clamp(22px, 5vw, 38px);
+        line-height: 1.4;
+        text-align: center;
+        padding: 24px 36px;
+        background: rgba(15, 17, 28, 0.6);
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 25px 45px rgba(0, 0, 0, 0.4);
+        max-width: min(90vw, 760px);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        backdrop-filter: blur(6px);
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+      .fg-purpose-text {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .fg-purpose-edit {
+        padding: 8px 16px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(27, 32, 52, 0.7);
+        color: #f2f5ff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .fg-purpose-edit:hover {
+        background: rgba(55, 79, 139, 0.8);
+        transform: translateY(-1px);
+      }
+      .fg-purpose-edit:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(98, 146, 255, 0.45);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+})();
+
+// === 【Leisure-Force-Home Patch】===
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "fg_mode_on_search_v1";
+  const HOME_PATH = "/";
+  const WATCH_PATH = "/watch";
+  const CHECK_INTERVAL = 1000;
+
+  let lastMode = null;
+  let scheduledUpdate = null;
+  let tickTimer = null;
+  let redirecting = false;
+  let detachDomHandlers = null;
+  let detachVideoWatcher = null;
+  let videoRetryTimer = null;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+
+  function init() {
+    lastMode = readMode();
+    wrapHistory();
+    window.addEventListener("popstate", scheduleUpdate, true);
+    ["yt-navigate-start", "yt-navigate-finish"].forEach((evt) => {
+      window.addEventListener(evt, scheduleUpdate, true);
+    });
+    document.addEventListener("yt-page-data-updated", scheduleUpdate, true);
+    window.addEventListener("storage", (event) => {
+      if (event.key === STORAGE_KEY) {
+        scheduleUpdate();
+      }
+    });
+    tickTimer = setInterval(checkModeTick, CHECK_INTERVAL);
+    updateGuards();
+  }
+
+  function checkModeTick() {
+    const current = readMode();
+    if (current !== lastMode) {
+      lastMode = current;
+      scheduleUpdate();
+    }
+  }
+
+  function scheduleUpdate() {
+    if (scheduledUpdate) return;
+    scheduledUpdate = setTimeout(() => {
+      scheduledUpdate = null;
+      updateGuards();
+    }, 0);
+  }
+
+  function updateGuards() {
+    if (!isLeisureMode()) {
+      clearDomHandlers();
+      clearVideoWatcher();
+      return;
+    }
+    clearDomHandlers();
+    clearVideoWatcher();
+  }
+
+  function attachDomHandlers() {
+    if (detachDomHandlers) return;
+
+    const clickHandler = (event) => {
+      if (!isLeisureMode()) return;
+      const anchor = findAnchor(event.target);
+      if (!anchor) return;
+      if (!shouldBlockAnchor(anchor)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      goHome();
+    };
+
+    const submitHandler = (event) => {
+      if (!isLeisureMode()) return;
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement)) return;
+      if (!shouldBlockForm(form)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      goHome();
+    };
+
+    const keydownHandler = (event) => {
+      if (!isLeisureMode()) return;
+      if (isEditableTarget(event.target)) return;
+      const key = event.key;
+      if (key === "Escape" || key === "h" || key === "H" || key === "Home") {
+        event.preventDefault();
+        event.stopPropagation();
+        goHome();
+      }
+    };
+
+    document.addEventListener("click", clickHandler, true);
+    document.addEventListener("submit", submitHandler, true);
+    document.addEventListener("keydown", keydownHandler, true);
+
+    detachDomHandlers = () => {
+      document.removeEventListener("click", clickHandler, true);
+      document.removeEventListener("submit", submitHandler, true);
+      document.removeEventListener("keydown", keydownHandler, true);
+      detachDomHandlers = null;
+    };
+  }
+
+  function clearDomHandlers() {
+    if (!detachDomHandlers) return;
+    detachDomHandlers();
+  }
+
+  function attachVideoWatcher() {
+    clearVideoWatcher();
+    if (!isLeisureMode()) return;
+    if (!isWatchPage()) return;
+
+    let attempts = 0;
+
+    const tryAttach = () => {
+      if (!isLeisureMode() || !isWatchPage()) {
+        videoRetryTimer = null;
+        return;
+      }
+      const video = document.querySelector("video");
+      if (video) {
+        const endedHandler = () => {
+          goHome();
+        };
+        video.addEventListener("ended", endedHandler, { once: true });
+        detachVideoWatcher = () => {
+          video.removeEventListener("ended", endedHandler);
+          detachVideoWatcher = null;
+        };
+        return;
+      }
+      attempts += 1;
+      const delay = attempts < 20 ? 500 : 2000;
+      videoRetryTimer = setTimeout(tryAttach, delay);
+    };
+
+    tryAttach();
+  }
+
+  function clearVideoWatcher() {
+    if (videoRetryTimer) {
+      clearTimeout(videoRetryTimer);
+      videoRetryTimer = null;
+    }
+    if (detachVideoWatcher) {
+      detachVideoWatcher();
+      detachVideoWatcher = null;
+    }
+  }
+
+  function goHome() {
+    if (redirecting) return;
+    if (location.pathname === HOME_PATH) return;
+    redirecting = true;
+    location.assign(HOME_PATH);
+    setTimeout(() => {
+      redirecting = false;
+    }, 3000);
+  }
+
+  function shouldBlockAnchor(anchor) {
+    const href = anchor.getAttribute("href");
+    if (!href) return false;
+    const trimmed = href.trim();
+    if (!trimmed || trimmed.startsWith("#") || /^javascript:/i.test(trimmed)) {
+      return false;
+    }
+    let url;
+    try {
+      url = new URL(trimmed, location.origin);
+    } catch {
+      return false;
+    }
+    if (url.origin !== location.origin) {
+      return true;
+    }
+    return url.pathname !== WATCH_PATH;
+  }
+
+  function shouldBlockForm(form) {
+    const action = form.getAttribute("action");
+    if (!action || action === "#") return false;
+    let url;
+    try {
+      url = new URL(action, location.origin);
+    } catch {
+      return false;
+    }
+    if (url.origin !== location.origin) return true;
+    return url.pathname !== WATCH_PATH;
+  }
+
+  function findAnchor(node) {
+    if (!node) return null;
+    if (typeof node.closest === "function") {
+      return node.closest("a");
+    }
+    while (node && node !== document) {
+      if (node instanceof HTMLAnchorElement) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function isEditableTarget(target) {
+    if (!target || !(target instanceof Element)) return false;
+    if (target.hasAttribute("contenteditable")) return true;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+  }
+
+  function wrapHistory() {
+    ["pushState", "replaceState"].forEach((method) => {
+      const original = history[method];
+      if (typeof original !== "function" || original.__fgLeisurePatched) return;
+      const wrapped = function (...args) {
+        const result = original.apply(this, args);
+        scheduleUpdate();
+        return result;
+      };
+      wrapped.__fgLeisurePatched = true;
+      history[method] = wrapped;
+    });
+  }
+
+  function isWatchPage() {
+    const path = location.pathname || "";
+    return path === WATCH_PATH || path.startsWith(`${WATCH_PATH}/`);
+  }
+
+  function readMode() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return typeof parsed.mode === "string" ? parsed.mode : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isLeisureMode() {
+    return lastMode === "leisure";
+  }
+})();
+
+/* Mode-on-Search Patch */
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "fg_mode_on_search_v1";
+  const STYLE_ID = "fg-mode-style";
+  const MODE_MODAL_ID = "fg-mode-modal";
+  const LEISURE_MODAL_ID = "fg-leisure-modal";
+  const LEISURE_BADGE_ID = "fg-leisure-badge";
+  const BAN_BADGE_ID = "fg-ban-badge";
+  const TOAST_ID = "fg-ban-toast";
+  const LEISURE_STOP_LABEL = "中断";
+  const LEISURE_REMAIN_CLASS = "fg-leisure-remaining";
+  const LEISURE_STOP_CLASS = "fg-leisure-stop";
+  const TICK_MS = 1000;
+
+  const state = load();
+  let modeModalEl = null;
+  let leisureModalEl = null;
+  let leisureBadgeEl = null;
+  let banBadgeEl = null;
+  let toastEl = null;
+  let toastTimer = null;
+  let tickHandle = null;
+  let hooksAttached = false;
+  let suppressPromptOnce = false;
+  let activeSearchInput = null;
+  let lastSearchInput = null;
+  let lastLeisureIncrementSec = 0;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+
+  function init() {
+    injectStyles();
+    hookSearchBar();
+    ensureTicker();
+    restoreUI();
+    enforceSearchBan();
+  }
+
+  function ensureTicker() {
+    if (tickHandle) return;
+    tickHandle = setInterval(tick, TICK_MS);
+    tick();
+  }
+
+  function tick() {
+    const current = now();
+    let changed = false;
+    let banJustStarted = false;
+    let banDurationSec = 0;
+
+    const leisureActive = state.leisureUntil > current;
+    if (!leisureActive && state.leisureUntil > 0) {
+      if (state.mode === "leisure" && state.leisureDurationSec > 0) {
+        banDurationSec = state.leisureDurationSec * 2;
+        state.searchBanUntil = current + banDurationSec * 1000;
+        banJustStarted = state.searchBanUntil > current;
+      }
+      state.leisureUntil = 0;
+      state.leisureDurationSec = 0;
+      if (state.mode === "leisure") state.mode = null;
+      changed = true;
+    }
+
+    if (state.leisureUntil > current) {
+      showLeisureBadge();
+      updateLeisureBadge();
+      incrementLeisureWatch();
+    } else {
+      removeLeisureBadge();
+    }
+
+    const banActive = state.searchBanUntil > current;
+    if (!banActive && state.searchBanUntil > 0) {
+      state.searchBanUntil = 0;
+      changed = true;
+      removeBanBadge();
+      removeBanToast();
+    }
+
+    if (banActive) {
+      showBanBadge();
+      updateBanBadge();
+    }
+
+    if (banJustStarted && banDurationSec > 0) {
+      showBanBadge();
+      updateBanBadge();
+      showBanToast(true, banDurationSec);
+    }
+
+    if (changed) save();
+    enforceSearchBan();
+  }
+
+  function restoreUI() {
+    if (isLeisureActive()) {
+      showLeisureBadge();
+      updateLeisureBadge();
+    }
+    if (isBanActive()) {
+      showBanBadge();
+      updateBanBadge();
+      enforceSearchBan();
+    }
+  }
+
+  function hookSearchBar() {
+    if (hooksAttached) return;
+    hooksAttached = true;
+    document.addEventListener("focusin", handleFocusIn, true);
+    document.addEventListener("focusout", handleFocusOut, true);
+    document.addEventListener("submit", handleSubmit, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+  }
+
+  function handleFocusIn(event) {
+    const target = event.target;
+    if (!isSearchInput(target)) return;
+    activeSearchInput = target;
+    lastSearchInput = target;
+    if (isBanActive()) {
+      enforceSearchBan();
+      showBanToast(false);
+      return;
+    }
+    if (modeModalEl || leisureModalEl) return;
+    if (isLeisureActive()) return;
+    if (suppressPromptOnce) {
+      suppressPromptOnce = false;
+      return;
+    }
+    showModeModal();
+  }
+
+  function handleFocusOut(event) {
+    if (!isSearchInput(event.target)) return;
+    activeSearchInput = null;
+    if (!isLeisureActive() && state.mode && state.mode !== "leisure") {
+      state.mode = null;
+      save();
+    }
+  }
+
+  function handleSubmit(event) {
+    const form = event.target;
+    if (!isSearchForm(form)) return;
+    if (isBanActive()) {
+      event.preventDefault();
+      event.stopPropagation();
+      enforceSearchBan();
+      showBanToast(false);
+      return;
+    }
+    if (state.mode && state.mode !== "leisure") {
+      state.mode = null;
+      save();
+    }
+  }
+
+  function handleKeyDown(event) {
+    if (!isBanActive()) return;
+    if (event.key !== "Enter") return;
+    const target = event.target;
+    if (isSearchInput(target) || isSearchForm(target.closest("form"))) {
+      event.preventDefault();
+      event.stopPropagation();
+      showBanToast(false);
+    }
+  }
+
+  function showModeModal() {
+    if (!document.body) return;
+    closeModeModal();
+    closeLeisureModal();
+    modeModalEl = modal(
+      MODE_MODAL_ID,
+      `
+        <h2>検索モードを選択</h2>
+        <div class="fg-mode-sub">目的を決めてから検索しましょう。</div>
+        <div class="fg-mode-buttons">
+          <button type="button" class="fg-mode-btn" data-mode="study">学習</button>
+          <button type="button" class="fg-mode-btn" data-mode="collect">情報収集</button>
+          <button type="button" class="fg-mode-btn primary" data-mode="leisure">娯楽</button>
+          <button type="button" class="fg-mode-btn danger" data-mode="cancel">キャンセル</button>
+        </div>
+      `,
+      (card, wrap) => {
+        wrap.addEventListener("click", (ev) => {
+          if (ev.target === wrap) {
+            state.mode = null;
+            save();
+            closeModeModal();
+            blurSearchInput();
+          }
+        });
+        const buttons = card.querySelectorAll(".fg-mode-btn");
+        buttons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.getAttribute("data-mode");
+            if (mode === "leisure") {
+              closeModeModal();
+              askLeisureMinutes();
+              return;
+            }
+            if (mode === "cancel") {
+              state.mode = null;
+              save();
+              closeModeModal();
+              blurSearchInput();
+              return;
+            }
+            state.mode = mode === "study" ? "study" : "collect";
+            state.leisureUntil = 0;
+            state.leisureDurationSec = 0;
+            save();
+            closeModeModal();
+            focusSearchInput();
+          });
+        });
+        const first = card.querySelector(".fg-mode-btn");
+        if (first) first.focus();
+      }
+    );
+  }
+
+  function closeModeModal() {
+    if (!modeModalEl) return;
+    close(modeModalEl);
+    modeModalEl = null;
+  }
+
+  function askLeisureMinutes() {
+    if (!document.body) return;
+    closeLeisureModal();
+    leisureModalEl = modal(
+      LEISURE_MODAL_ID,
+      `
+        <h2>娯楽タイマー</h2>
+        <div class="fg-mode-sub">視聴時間を選んでタイマーを開始します。</div>
+        <div class="fg-mode-buttons fg-mode-buttons-inline">
+          <button type="button" class="fg-mode-btn primary" data-sec="300">5 分</button>
+          <button type="button" class="fg-mode-btn primary" data-sec="600">10 分</button>
+          <button type="button" class="fg-mode-btn primary" data-sec="900">15 分</button>
+        </div>
+        <div class="fg-mode-buttons">
+          <button type="button" class="fg-mode-btn danger" data-action="cancel">キャンセル</button>
+        </div>
+      `,
+      (card, wrap) => {
+        wrap.addEventListener("click", (ev) => {
+          if (ev.target === wrap) {
+            state.mode = null;
+            save();
+            closeLeisureModal();
+            blurSearchInput();
+          }
+        });
+        card.querySelectorAll("[data-sec]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const sec = Number(btn.getAttribute("data-sec") || "0");
+            if (sec > 0) {
+              startLeisureTimer(sec);
+            }
+          });
+        });
+        const cancel = card.querySelector('[data-action="cancel"]');
+        if (cancel) {
+          cancel.addEventListener("click", () => {
+            state.mode = null;
+            save();
+            closeLeisureModal();
+            blurSearchInput();
+          });
+        }
+        const first = card.querySelector("[data-sec]");
+        if (first) first.focus();
+      }
+    );
+  }
+
+  function closeLeisureModal() {
+    if (!leisureModalEl) return;
+    close(leisureModalEl);
+    leisureModalEl = null;
+  }
+
+  function startLeisureTimer(seconds) {
+    state.mode = "leisure";
+    state.leisureDurationSec = seconds;
+    state.leisureUntil = now() + seconds * 1000;
+    save();
+    closeLeisureModal();
+    showLeisureBadge();
+    updateLeisureBadge();
+    ensureTicker();
+    removeBanToast();
+    focusSearchInput();
+  }
+
+  function showLeisureBadge() {
+    if (!document.body) return;
+    const existing = document.getElementById(LEISURE_BADGE_ID);
+    if (existing) existing.remove();
+    leisureBadgeEl = document.createElement("div");
+    leisureBadgeEl.id = LEISURE_BADGE_ID;
+    leisureBadgeEl.className = "fg-badge";
+    leisureBadgeEl.innerHTML = `
+      <div class="fg-leisure-label">
+        娯楽 残り <span class="${LEISURE_REMAIN_CLASS}">${fmt(getRemainingSec(state.leisureUntil))}</span>
+      </div>
+      <button type="button" class="${LEISURE_STOP_CLASS}">${LEISURE_STOP_LABEL}</button>
+    `;
+    const stopBtn = leisureBadgeEl.querySelector(`.${LEISURE_STOP_CLASS}`);
+    if (stopBtn) {
+      stopBtn.addEventListener("click", cancelLeisureMode);
+    }
+    document.body.appendChild(leisureBadgeEl);
+  }
+
+  function updateLeisureBadge() {
+    if (!isLeisureActive()) {
+      removeLeisureBadge();
+      return;
+    }
+    if (!leisureBadgeEl) leisureBadgeEl = document.getElementById(LEISURE_BADGE_ID);
+    if (!leisureBadgeEl) {
+      showLeisureBadge();
+      return;
+    }
+    const remainEl = leisureBadgeEl.querySelector(`.${LEISURE_REMAIN_CLASS}`);
+    if (remainEl) {
+      remainEl.textContent = fmt(getRemainingSec(state.leisureUntil));
+    } else {
+      leisureBadgeEl.textContent = `娯楽 残り ${fmt(getRemainingSec(state.leisureUntil))}`;
+    }
+  }
+
+  function removeLeisureBadge() {
+    if (leisureBadgeEl) {
+      leisureBadgeEl.remove();
+      leisureBadgeEl = null;
+    } else {
+      const existing = document.getElementById(LEISURE_BADGE_ID);
+      if (existing) existing.remove();
+    }
+  }
+
+  function cancelLeisureMode() {
+    state.mode = null;
+    state.leisureUntil = 0;
+    state.leisureDurationSec = 0;
+    state.searchBanUntil = 0;
+    lastLeisureIncrementSec = 0;
+    save();
+    removeLeisureBadge();
+    removeBanBadge();
+    removeBanToast();
+    enforceSearchBan();
+    scheduleUpdate();
+    goHome();
+  }
+
+  function incrementLeisureWatch() {
+    if (!isLeisureMode()) return;
+    if (isVideoPlaying()) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (lastLeisureIncrementSec === nowSec) return;
+    lastLeisureIncrementSec = nowSec;
+
+    const today = todayKey();
+    if (!today) return;
+    const KEY = "yt_reason_daily_v1";
+    let store = {};
+    try {
+      store = JSON.parse(localStorage.getItem(KEY)) || {};
+    } catch {
+      store = {};
+    }
+    const entry = normalizeDailyEntry(store[today]);
+    entry.totalSeconds += 1;
+    entry.nonLearningSeconds += 1;
+    entry.entertainmentSeconds += 1;
+    store[today] = entry;
+    try {
+      localStorage.setItem(KEY, JSON.stringify(store));
+    } catch {
+      /* ignore quota errors */
+    }
+    refreshWatchOverlay(entry);
+  }
+
+  function normalizeDailyEntry(val) {
+    const base = {
+      totalSeconds: 0,
+      nonLearningSeconds: 0,
+      learningSeconds: 0,
+      entertainmentSeconds: 0,
+    };
+    if (!val || typeof val !== "object") return { ...base };
+    return {
+      totalSeconds: Math.max(0, Number(val.totalSeconds) || 0),
+      nonLearningSeconds: Math.max(0, Number(val.nonLearningSeconds) || 0),
+      learningSeconds: Math.max(0, Number(val.learningSeconds) || 0),
+      entertainmentSeconds: Math.max(0, Number(val.entertainmentSeconds) || 0),
+    };
+  }
+
+  function refreshWatchOverlay(entry) {
+    const overlay = document.querySelector(".yt-watch-overlay");
+    if (!overlay) return;
+    const stats = entry || getTodayStats();
+    if (!stats) return;
+    const totalEl = overlay.querySelector(".yt-watch-total");
+    const learnRow = overlay.querySelector(".yt-watch-learning");
+    const learnTimeEl = learnRow ? learnRow.querySelector(".time") : null;
+    const entertainRow = overlay.querySelector(".yt-watch-entertain");
+    const entertainTimeEl = entertainRow ? entertainRow.querySelector(".time") : null;
+    const nonRow = overlay.querySelector(".yt-watch-nonlearning");
+    const nonTimeEl = nonRow ? nonRow.querySelector(".time") : null;
+
+    if (totalEl) totalEl.textContent = formatHMS(stats.totalSeconds);
+    if (learnRow && learnTimeEl) {
+      learnRow.style.display = "flex";
+      learnTimeEl.textContent = formatHMS(stats.learningSeconds);
+    }
+    if (entertainRow && entertainTimeEl) {
+      entertainRow.style.display = "flex";
+      entertainTimeEl.textContent = formatHMS(stats.entertainmentSeconds);
+    }
+    if (nonRow && nonTimeEl) {
+      const otherSeconds = Math.max(0, stats.nonLearningSeconds - stats.entertainmentSeconds);
+      if (otherSeconds > 0) {
+        nonRow.style.display = "flex";
+        nonTimeEl.textContent = formatHMS(otherSeconds);
+      } else {
+        nonRow.style.display = "none";
+      }
+    }
+  }
+
+  function getTodayStats() {
+    const KEY = "yt_reason_daily_v1";
+    const today = todayKey();
+    if (!today) return null;
+    try {
+      const store = JSON.parse(localStorage.getItem(KEY)) || {};
+      return normalizeDailyEntry(store[today]);
+    } catch {
+      return null;
+    }
+  }
+
+  function formatHMS(sec) {
+    const total = Math.max(0, Math.floor(Number(sec) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
+  function todayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function isVideoPlaying() {
+    const videos = Array.from(document.querySelectorAll("video"));
+    return videos.some((video) => {
+      try {
+        return !video.paused && !video.ended && video.readyState >= 2;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function showBanBadge() {
+    if (!document.body) return;
+    const existing = document.getElementById(BAN_BADGE_ID);
+    if (existing) existing.remove();
+    banBadgeEl = document.createElement("div");
+    banBadgeEl.id = BAN_BADGE_ID;
+    banBadgeEl.className = "fg-badge";
+    banBadgeEl.textContent = `検索禁止 残り ${fmt(getRemainingSec(state.searchBanUntil))}`;
+    document.body.appendChild(banBadgeEl);
+  }
+
+  function updateBanBadge() {
+    if (!isBanActive()) {
+      removeBanBadge();
+      return;
+    }
+    if (!banBadgeEl) banBadgeEl = document.getElementById(BAN_BADGE_ID);
+    if (!banBadgeEl) {
+      showBanBadge();
+      return;
+    }
+    banBadgeEl.textContent = `検索禁止 残り ${fmt(getRemainingSec(state.searchBanUntil))}`;
+  }
+
+  function removeBanBadge() {
+    if (banBadgeEl) {
+      banBadgeEl.remove();
+      banBadgeEl = null;
+    } else {
+      const existing = document.getElementById(BAN_BADGE_ID);
+      if (existing) existing.remove();
+    }
+  }
+
+  function showBanToast(justStarted, totalSec) {
+    const remaining = getRemainingSec(state.searchBanUntil);
+    if (remaining <= 0) return;
+    const total = typeof totalSec === "number" && totalSec > 0 ? fmt(totalSec) : null;
+    const message = justStarted
+      ? `検索禁止モード開始 (${total ?? fmt(remaining)})。残り ${fmt(remaining)}。`
+      : `検索禁止中です。残り ${fmt(remaining)}。`;
+    toast(message);
+  }
+
+  function toast(text) {
+    if (!document.body) return;
+    removeBanToast();
+    toastEl = document.createElement("div");
+    toastEl.id = TOAST_ID;
+    toastEl.textContent = text;
+    toastEl.setAttribute("role", "status");
+    document.body.appendChild(toastEl);
+    toastTimer = setTimeout(removeBanToast, 3200);
+  }
+
+  function removeBanToast() {
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+    if (toastEl) {
+      toastEl.remove();
+      toastEl = null;
+    } else {
+      const existing = document.getElementById(TOAST_ID);
+      if (existing) existing.remove();
+    }
+  }
+
+  function enforceSearchBan() {
+    const active = isBanActive();
+    const inputs = querySearchInputs();
+    inputs.forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      if (active) {
+        if (!input.dataset.fgBanFlag) {
+          input.dataset.fgBanFlag = input.disabled ? "1" : "0";
+        }
+        input.disabled = true;
+        input.setAttribute("aria-disabled", "true");
+        input.classList.add("fg-search-blocked");
+        if (document.activeElement === input) {
+          input.blur();
+        }
+      } else if (input.dataset.fgBanFlag !== undefined) {
+        if (input.dataset.fgBanFlag === "0") {
+          input.disabled = false;
+        }
+        delete input.dataset.fgBanFlag;
+        input.removeAttribute("aria-disabled");
+        input.classList.remove("fg-search-blocked");
+      }
+    });
+  }
+
+  function modal(id, innerHTML, onAttach) {
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+    const wrap = document.createElement("div");
+    wrap.id = id;
+    wrap.className = "fg-modal-backdrop";
+    wrap.innerHTML = `<div class="fg-modal-card" role="dialog" aria-modal="true">${innerHTML}</div>`;
+    document.body.appendChild(wrap);
+    const card = wrap.querySelector(".fg-modal-card");
+    if (typeof onAttach === "function") {
+      onAttach(card, wrap);
+    }
+    return wrap;
+  }
+
+  function close(el) {
+    if (el && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  }
+
+  function blurSearchInput() {
+    if (activeSearchInput && typeof activeSearchInput.blur === "function") {
+      activeSearchInput.blur();
+    }
+  }
+
+  function focusSearchInput() {
+    if (!lastSearchInput || isBanActive()) return;
+    suppressPromptOnce = true;
+    setTimeout(() => {
+      if (!lastSearchInput || isBanActive()) {
+        suppressPromptOnce = false;
+        return;
+      }
+      try {
+        lastSearchInput.focus();
+        if (typeof lastSearchInput.select === "function") {
+          lastSearchInput.select();
+        }
+      } catch (err) {
+        // ignore
+      } finally {
+        suppressPromptOnce = false;
+      }
+    }, 0);
+  }
+
+  function injectStyles() {
+    const existing = document.getElementById(STYLE_ID);
+    if (existing) existing.remove();
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .fg-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 2147483647;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .fg-modal-card {
+        width: min(92vw, 360px);
+        background: rgba(18, 18, 22, 0.96);
+        color: #f1f3f6;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 28px 56px rgba(0, 0, 0, 0.45);
+        padding: 20px 22px 24px;
+      }
+      .fg-modal-card h2 {
+        margin: 0 0 10px;
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .fg-mode-sub {
+        font-size: 13px;
+        opacity: 0.78;
+        line-height: 1.5;
+      }
+      .fg-mode-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .fg-mode-buttons-inline {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: space-between;
+      }
+      .fg-mode-buttons-inline .fg-mode-btn {
+        flex: 1 1 calc(33% - 8px);
+        min-width: 90px;
+      }
+      .fg-mode-btn {
+        padding: 11px 14px;
+        border-radius: 12px;
+        border: none;
+        background: #2c2e3a;
+        color: #fefefe;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .fg-mode-btn:hover {
+        background: #3c3f4c;
+        transform: translateY(-1px);
+      }
+      .fg-mode-btn:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(86, 141, 255, 0.6);
+      }
+      .fg-mode-btn.primary {
+        background: #2b5bd7;
+      }
+      .fg-mode-btn.primary:hover {
+        background: #3166f0;
+      }
+      .fg-mode-btn.danger {
+        background: #a23a3a;
+      }
+      .fg-mode-btn.danger:hover {
+        background: #b64444;
+      }
+      .fg-badge {
+        position: fixed;
+        z-index: 2147483647;
+        padding: 10px 16px;
+        border-radius: 12px;
+        background: rgba(20, 22, 33, 0.9);
+        color: #f7f9ff;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      #fg-leisure-badge {
+        right: 18px;
+        bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      #fg-leisure-badge .fg-leisure-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+      }
+      #fg-leisure-badge .${LEISURE_REMAIN_CLASS} {
+        font-variant-numeric: tabular-nums;
+      }
+      #fg-leisure-badge .${LEISURE_STOP_CLASS} {
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(45, 63, 112, 0.8);
+        color: #f3f5ff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      #fg-leisure-badge .${LEISURE_STOP_CLASS}:hover {
+        background: rgba(65, 88, 152, 0.9);
+        transform: translateY(-1px);
+      }
+      #fg-ban-badge {
+        left: 18px;
+        bottom: 18px;
+      }
+      #fg-ban-toast {
+        position: fixed;
+        left: 50%;
+        bottom: 32px;
+        transform: translateX(-50%);
+        background: rgba(25, 27, 40, 0.95);
+        color: #f5f7ff;
+        border-radius: 12px;
+        padding: 12px 18px;
+        z-index: 2147483647;
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 14px;
+        max-width: 80vw;
+        text-align: center;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .fg-search-blocked {
+        cursor: not-allowed !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getSearchSelectors() {
+    return [
+      "input#search",
+      "input#search-input",
+      "input#masthead-search-term",
+      "input[id='searchbox-input']",
+      "ytd-searchbox input",
+      "input[name='search_query']",
+      "form#search-form input",
+      "input[aria-label*='Search']",
+      "input[aria-label*='search']",
+      "input[aria-label*='検索']",
+      "input[type='search']"
+    ];
+  }
+
+  function querySearchInputs() {
+    const selectors = getSearchSelectors();
+    const results = [];
+    selectors.forEach((selector) => {
+      let nodes;
+      try {
+        nodes = document.querySelectorAll(selector);
+      } catch {
+        nodes = [];
+      }
+      nodes.forEach((node) => {
+        if (!(node instanceof HTMLInputElement)) return;
+        if (!results.includes(node)) results.push(node);
+      });
+    });
+    return results;
+  }
+
+  function isSearchInput(el) {
+    if (!(el instanceof HTMLInputElement)) return false;
+    const selectors = getSearchSelectors();
+    return selectors.some((selector) => {
+      try {
+        return el.matches(selector);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function isSearchForm(el) {
+    if (!(el instanceof HTMLFormElement)) return false;
+    const inputs = querySearchInputs();
+    return inputs.some((input) => input.form === el || el.contains(input));
+  }
+
+  function now() {
+    return Date.now();
+  }
+
+  function getRemainingSec(untilMs) {
+    return Math.max(0, Math.ceil((untilMs - now()) / 1000));
+  }
+
+  function fmt(sec) {
+    const total = Math.max(0, Math.floor(sec));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    if (h > 0) {
+      return `${h}:${pad(m)}:${pad(s)}`;
+    }
+    return `${pad(m)}:${pad(s)}`;
+  }
+
+  function isLeisureActive() {
+    return state.leisureUntil > now();
+  }
+
+  function isBanActive() {
+    return state.searchBanUntil > now();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      /* ignore quota errors */
+    }
+  }
+
+  function load() {
+    const fallback = {
+      mode: null,
+      leisureUntil: 0,
+      searchBanUntil: 0,
+      leisureDurationSec: 0
+    };
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return {
+        mode: typeof parsed.mode === "string" ? parsed.mode : null,
+        leisureUntil: Number(parsed.leisureUntil) || 0,
+        searchBanUntil: Number(parsed.searchBanUntil) || 0,
+        leisureDurationSec: Number(parsed.leisureDurationSec) || 0
+      };
+    } catch {
+      return fallback;
+    }
+  }
 })();
