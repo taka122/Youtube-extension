@@ -637,11 +637,11 @@
     $text.addEventListener("input", validate);
     validate();
 
-    $ok.addEventListener("click", () => {
+    const submitReason = () => {
+      if ($ok.disabled) return;
       const reason = $text.value.trim();
       const category = $cat.value;
 
-      // 保存
       const key = currentVideoKey();
       const reasons = load(STORAGE_KEYS.reasons, {});
       const payload = {
@@ -663,14 +663,21 @@
 
       removeModal();
 
-      // 再生
       const v = document.querySelector("video");
       if (v) {
         v.play().catch(() => {});
       }
 
-      // カウント開始
       startTick(category);
+    };
+
+    $ok.addEventListener("click", submitReason);
+
+    $text.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        submitReason();
+      }
     });
 
     // フォーカス & 入力初期化
@@ -860,6 +867,7 @@
   let modalEl = null;
   let displayEl = null;
   let tickTimer = null;
+  let isPurposeEditing = false;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
@@ -906,8 +914,13 @@
     const text = hasToday ? String(payload.text || "") : "";
     if (!hasToday || text.trim().length === 0) {
       removeDisplay();
-      showModal({ mandatory: true, initialText: text });
+      if (!isPurposeEditing) {
+        showModal({ mandatory: true, initialText: text });
+      }
     } else {
+      if (isPurposeEditing) {
+        return;
+      }
       removeModal();
       updateDisplay(text);
     }
@@ -935,6 +948,7 @@
     `;
     document.body.appendChild(modal);
     modalEl = modal;
+    isPurposeEditing = !mandatory;
 
     if (!mandatory) {
       modal.addEventListener("click", (ev) => {
@@ -958,6 +972,7 @@
 
     if (cancelBtn) {
       cancelBtn.addEventListener("click", () => {
+        isPurposeEditing = false;
         removeModal();
       });
     }
@@ -966,7 +981,7 @@
       saveBtn.disabled = textarea.value.trim().length === 0;
     });
 
-    saveBtn.addEventListener("click", () => {
+    const submitPurpose = () => {
       const text = textarea.value.trim();
       if (!text) return;
       const payload = {
@@ -975,8 +990,18 @@
         updatedAt: Date.now(),
       };
       savePurpose(payload);
+      isPurposeEditing = false;
       removeModal();
       updateDisplay(text);
+    };
+
+    saveBtn.addEventListener("click", submitPurpose);
+
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        if (!saveBtn.disabled) submitPurpose();
+      }
     });
 
     setTimeout(() => {
@@ -990,6 +1015,7 @@
       modalEl.remove();
       modalEl = null;
     }
+    isPurposeEditing = false;
   }
 
   function updateDisplay(text) {
