@@ -18,6 +18,8 @@ There is English Guide below
 	•	YouTube Shorts の自動ブロック／リダイレクト、関連 UI の非表示
 	•	検索バーにフォーカスすると「学習／娯楽／情報収集」モードの選択を強制
 	•	娯楽モードでは 5/10/15 分タイマー＋終了後の検索禁止モードを自動適用
+	•	モードインジケーターで現在のモードや残り時間を常時表示
+	•	情報収集モードでは「何を知りたいか」「何のためか」を入力し、所要時間タイマーと完了確認モーダルで振り返りを促す（Notion での整理をリマインド）
 	•	ホーム画面で「今日の目的」を毎日入力させ、入力済みテキストを中央に常時表示（編集ボタンからいつでも更新可能）
 	•	娯楽モードはバッジの「中断」ボタンで終了でき、中断後はホーム画面へ遷移
 	•	PC / モバイル版（m.youtube.com）どちらでも動作
@@ -136,6 +138,7 @@ localStorage.removeItem('fg_daily_purpose_v1');
 		◦	娯楽モード中の強制ホーム遷移ガードを廃止し、通常のナビゲーションを維持
 		◦	ホーム画面で「今日の目的」を強制入力させ、入力済みテキストを中央表示＆編集ボタンで更新可能に
 		◦	娯楽モードの残り時間バッジに中断ボタンを追加し、中断後はホームへ自動遷移
+		◦	情報収集モードに目的入力・タイマー・完了確認モーダル・Notion メモ促しを追加し、モードインジケーターで状況を可視化
 
 ⸻
 
@@ -169,6 +172,8 @@ Key Features
 	•	Block/redirect YouTube Shorts and hide related UI elements
 	•	Force-select a viewing mode (Learning / Leisure / Research) whenever the search bar is focused
 	•	Start a 5/10/15 minute leisure timer and trigger a search-ban cooldown once the timer ends
+	•	Show a persistent mode indicator with the active mode and remaining timers
+	•	For Research mode, capture “what to learn” and “why,” run a focused timer, then ask if the task was accomplished and remind you to summarise in Notion
 	•	On the home feed, require a daily purpose entry, keep the saved text centered, and provide an edit button
 	•	Allow cancelling leisure mode from its badge, automatically returning to the home feed
 	•	Works on both PC and mobile (m.youtube.com)
@@ -246,6 +251,7 @@ Changelog
 		◦	Removed the forced redirection to home when leisure-mode videos end or leave `/watch`
 		◦	Required a daily purpose entry on the home feed, centered it, and added an edit button for updates
 		◦	Added a cancel button to the leisure timer badge that stops the session and returns to home
+		◦	Expanded Research mode with goal capture, focused timers, completion check modal, and Notion follow-up prompt, plus a persistent mode indicator
 
 ⸻
 

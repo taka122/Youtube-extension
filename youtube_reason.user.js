@@ -1516,17 +1516,37 @@
   const MODE_MODAL_ID = "fg-mode-modal";
   const LEISURE_MODAL_ID = "fg-leisure-modal";
   const LEISURE_BADGE_ID = "fg-leisure-badge";
+  const COLLECT_MODAL_ID = "fg-collect-modal";
+  const COLLECT_BADGE_ID = "fg-collect-badge";
+  const COLLECT_REVIEW_MODAL_ID = "fg-collect-review";
+  const COLLECT_NOTION_MODAL_ID = "fg-collect-notion";
+  const MODE_INDICATOR_ID = "fg-mode-indicator";
   const BAN_BADGE_ID = "fg-ban-badge";
   const TOAST_ID = "fg-ban-toast";
   const LEISURE_STOP_LABEL = "中断";
   const LEISURE_REMAIN_CLASS = "fg-leisure-remaining";
   const LEISURE_STOP_CLASS = "fg-leisure-stop";
+  const COLLECT_REMAIN_CLASS = "fg-collect-remaining";
+  const COLLECT_EXTEND_CLASS = "fg-collect-extend";
+  const COLLECT_DONE_CLASS = "fg-collect-done";
+  const COLLECT_TOPIC_CLASS = "fg-collect-topic";
+  const COLLECT_TIME_OPTIONS = [5, 10, 15];
   const TICK_MS = 1000;
 
   const state = load();
+  state.collectTopic = typeof state.collectTopic === "string" ? state.collectTopic : "";
+  state.collectPurpose = typeof state.collectPurpose === "string" ? state.collectPurpose : "";
+  state.collectDurationSec = Number(state.collectDurationSec) || 0;
+  state.collectUntil = Number(state.collectUntil) || 0;
+  state.collectNeedsReview = Boolean(state.collectNeedsReview);
   let modeModalEl = null;
   let leisureModalEl = null;
   let leisureBadgeEl = null;
+  let collectModalEl = null;
+  let collectBadgeEl = null;
+  let collectReviewModalEl = null;
+  let collectNotionModalEl = null;
+  let modeIndicatorEl = null;
   let banBadgeEl = null;
   let toastEl = null;
   let toastTimer = null;
@@ -1549,6 +1569,7 @@
     ensureTicker();
     restoreUI();
     enforceSearchBan();
+    updateModeIndicator();
   }
 
   function ensureTicker() {
@@ -1584,6 +1605,17 @@
       removeLeisureBadge();
     }
 
+    const collectActive = isCollectActive();
+    if (collectActive) {
+      showCollectBadge();
+      updateCollectBadge();
+    } else if (state.collectNeedsReview && state.collectTopic) {
+      showCollectCompletionModal();
+    } else {
+      removeCollectBadge();
+      removeCollectReviewModal();
+    }
+
     const banActive = state.searchBanUntil > current;
     if (!banActive && state.searchBanUntil > 0) {
       state.searchBanUntil = 0;
@@ -1605,6 +1637,7 @@
 
     if (changed) save();
     enforceSearchBan();
+    updateModeIndicator();
   }
 
   function restoreUI() {
@@ -1612,11 +1645,19 @@
       showLeisureBadge();
       updateLeisureBadge();
     }
+    if (isCollectActive()) {
+      showCollectBadge();
+      updateCollectBadge();
+    }
     if (isBanActive()) {
       showBanBadge();
       updateBanBadge();
       enforceSearchBan();
     }
+    if (state.collectNeedsReview && state.collectTopic && !isCollectActive()) {
+      showCollectCompletionModal();
+    }
+    updateModeIndicator();
   }
 
   function hookSearchBar() {
@@ -1650,9 +1691,10 @@
   function handleFocusOut(event) {
     if (!isSearchInput(event.target)) return;
     activeSearchInput = null;
-    if (!isLeisureActive() && state.mode && state.mode !== "leisure") {
+    if (!isLeisureActive() && state.mode === "study") {
       state.mode = null;
       save();
+      updateModeIndicator();
     }
   }
 
@@ -1666,9 +1708,10 @@
       showBanToast(false);
       return;
     }
-    if (state.mode && state.mode !== "leisure") {
+    if (state.mode === "study") {
       state.mode = null;
       save();
+      updateModeIndicator();
     }
   }
 
@@ -1706,6 +1749,7 @@
             save();
             closeModeModal();
             blurSearchInput();
+            updateModeIndicator();
           }
         });
         const buttons = card.querySelectorAll(".fg-mode-btn");
@@ -1717,19 +1761,44 @@
               askLeisureMinutes();
               return;
             }
+            if (mode === "collect") {
+              closeModeModal();
+              showCollectSetupModal();
+              return;
+            }
             if (mode === "cancel") {
               state.mode = null;
+              state.collectTopic = "";
+              state.collectPurpose = "";
+              state.collectDurationSec = 0;
+              state.collectUntil = 0;
+              state.collectNeedsReview = false;
               save();
               closeModeModal();
               blurSearchInput();
+              removeCollectBadge();
+              removeCollectReviewModal();
+              closeCollectModal();
+              closeCollectNotionModal();
+              updateModeIndicator();
               return;
             }
-            state.mode = mode === "study" ? "study" : "collect";
+            state.mode = "study";
             state.leisureUntil = 0;
             state.leisureDurationSec = 0;
+            state.collectTopic = "";
+            state.collectPurpose = "";
+            state.collectDurationSec = 0;
+            state.collectUntil = 0;
+            state.collectNeedsReview = false;
             save();
             closeModeModal();
             focusSearchInput();
+            removeCollectBadge();
+            removeCollectReviewModal();
+            closeCollectModal();
+            closeCollectNotionModal();
+            updateModeIndicator();
           });
         });
         const first = card.querySelector(".fg-mode-btn");
@@ -1742,6 +1811,141 @@
     if (!modeModalEl) return;
     close(modeModalEl);
     modeModalEl = null;
+  }
+
+  function showCollectSetupModal(options = {}) {
+    const {
+      initialTopic = state.collectTopic || "",
+      initialPurpose = state.collectPurpose || "",
+      initialMinutes = state.collectDurationSec ? Math.round(state.collectDurationSec / 60) : 0,
+      isExtension = false,
+    } = options;
+
+    if (collectModalEl) {
+      close(collectModalEl);
+      collectModalEl = null;
+    }
+
+    const title = isExtension ? "情報収集を延長" : "情報収集モード";
+    const actionLabel = isExtension ? "延長開始" : "開始";
+
+    const timeButtons = COLLECT_TIME_OPTIONS.map((min) => `
+      <button type="button" class="fg-mode-btn fg-collect-time-btn${min === initialMinutes ? " selected" : ""}" data-min="${min}">${min} 分</button>
+    `).join("");
+
+    collectModalEl = modal(
+      COLLECT_MODAL_ID,
+      `
+        <div class="fg-mode-sub">調べたい内容と目的、所要時間を入力してください。</div>
+        <div class="fg-mode-buttons fg-collect-field">
+          <label class="fg-collect-label">調べたい内容</label>
+          <textarea class="fg-collect-input" id="fg_collect_topic" rows="3" placeholder="例: 最新のLLMベンチマークと特徴"></textarea>
+        </div>
+        <div class="fg-mode-buttons fg-collect-field">
+          <label class="fg-collect-label">何のために調べる？</label>
+          <input type="text" class="fg-collect-purpose" id="fg_collect_purpose" placeholder="例: 社内共有資料にまとめる" />
+        </div>
+        <div class="fg-mode-buttons fg-mode-buttons-inline fg-collect-time-picker">
+          ${timeButtons}
+        </div>
+        <div class="fg-mode-buttons fg-collect-actions">
+          <button type="button" class="fg-mode-btn danger" data-action="cancel">キャンセル</button>
+          <button type="button" class="fg-mode-btn primary" data-action="save" disabled>${actionLabel}</button>
+        </div>
+      `,
+      (card, wrap) => {
+        wrap.addEventListener("click", (ev) => {
+          if (ev.target === wrap) {
+            closeCollectModal();
+            if (!isExtension && !state.collectTopic) {
+              state.mode = null;
+              save();
+              updateModeIndicator();
+            }
+          }
+        });
+
+        const topicEl = card.querySelector("#fg_collect_topic");
+        const purposeEl = card.querySelector("#fg_collect_purpose");
+        const saveBtn = card.querySelector('[data-action="save"]');
+        const cancelBtn = card.querySelector('[data-action="cancel"]');
+        const timeBtns = Array.from(card.querySelectorAll(".fg-collect-time-btn"));
+
+        let selectedMinutes = initialMinutes && COLLECT_TIME_OPTIONS.includes(initialMinutes) ? initialMinutes : 0;
+
+        const updateSaveState = () => {
+          const topicOk = topicEl.value.trim().length >= 3;
+          const purposeOk = purposeEl.value.trim().length >= 3;
+          saveBtn.disabled = !(topicOk && purposeOk && selectedMinutes > 0);
+        };
+
+        timeBtns.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            timeBtns.forEach((b) => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            selectedMinutes = Number(btn.getAttribute("data-min") || "0");
+            updateSaveState();
+          });
+        });
+
+        topicEl.value = initialTopic;
+        purposeEl.value = initialPurpose;
+        updateSaveState();
+
+        topicEl.addEventListener("input", updateSaveState);
+        purposeEl.addEventListener("input", updateSaveState);
+
+        topicEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+            event.preventDefault();
+            if (!saveBtn.disabled) saveBtn.click();
+          }
+        });
+
+        purposeEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+            event.preventDefault();
+            if (!saveBtn.disabled) saveBtn.click();
+          }
+        });
+
+        if (cancelBtn) {
+          cancelBtn.addEventListener("click", () => {
+            closeCollectModal();
+            if (!isExtension && !state.collectTopic) {
+              state.mode = null;
+              save();
+              updateModeIndicator();
+            } else if (isExtension) {
+              state.collectNeedsReview = true;
+              save();
+              if (!isCollectActive()) {
+                showCollectCompletionModal();
+              }
+            }
+          });
+        }
+
+        saveBtn.addEventListener("click", () => {
+          const topic = topicEl.value.trim();
+          const purpose = purposeEl.value.trim();
+          if (!topic || !purpose || selectedMinutes <= 0) return;
+          startCollectSession({ topic, purpose, minutes: selectedMinutes });
+          closeCollectModal();
+        });
+
+        setTimeout(() => {
+          topicEl.focus();
+          topicEl.select();
+        }, 0);
+      }
+    );
+  }
+
+  function closeCollectModal() {
+    if (!collectModalEl) return;
+    close(collectModalEl);
+    collectModalEl = null;
   }
 
   function askLeisureMinutes() {
@@ -1810,6 +2014,24 @@
     ensureTicker();
     removeBanToast();
     focusSearchInput();
+    updateModeIndicator();
+  }
+
+  function startCollectSession({ topic, purpose, minutes }) {
+    state.mode = "collect";
+    state.collectTopic = topic;
+    state.collectPurpose = purpose;
+    state.collectDurationSec = minutes * 60;
+    state.collectUntil = now() + minutes * 60 * 1000;
+    state.collectNeedsReview = true;
+    save();
+    removeCollectReviewModal();
+    closeCollectNotionModal();
+    showCollectBadge();
+    updateCollectBadge();
+    ensureTicker();
+    updateModeIndicator();
+    focusSearchInput();
   }
 
   function showLeisureBadge() {
@@ -1860,6 +2082,71 @@
     }
   }
 
+  function showCollectBadge() {
+    if (!document.body) return;
+    const existing = document.getElementById(COLLECT_BADGE_ID);
+    if (existing) existing.remove();
+    collectBadgeEl = document.createElement("div");
+    collectBadgeEl.id = COLLECT_BADGE_ID;
+    collectBadgeEl.className = "fg-badge fg-collect-badge";
+    const topic = escapeHtml(state.collectTopic || "");
+    collectBadgeEl.innerHTML = `
+      <div class="fg-collect-row">
+        <span class="fg-collect-label">情報収集</span>
+        <span class="${COLLECT_TOPIC_CLASS}">${topic}</span>
+      </div>
+      <div class="fg-collect-row">
+        <span>残り</span>
+        <span class="${COLLECT_REMAIN_CLASS}">${formatHMS(Math.max(0, Math.ceil((state.collectUntil - now()) / 1000)))}</span>
+      </div>
+      <div class="fg-collect-actions">
+        <button type="button" class="fg-collect-btn ${COLLECT_DONE_CLASS}">完了</button>
+        <button type="button" class="fg-collect-btn ${COLLECT_EXTEND_CLASS}">延長</button>
+      </div>
+    `;
+    const doneBtn = collectBadgeEl.querySelector(`.${COLLECT_DONE_CLASS}`);
+    const extendBtn = collectBadgeEl.querySelector(`.${COLLECT_EXTEND_CLASS}`);
+    if (doneBtn) {
+      doneBtn.addEventListener("click", () => {
+        completeCollectSession(true);
+      });
+    }
+    if (extendBtn) {
+      extendBtn.addEventListener("click", () => {
+        showCollectExtensionSetup();
+      });
+    }
+    document.body.appendChild(collectBadgeEl);
+  }
+
+  function updateCollectBadge() {
+    if (!isCollectActive()) {
+      removeCollectBadge();
+      return;
+    }
+    if (!collectBadgeEl) collectBadgeEl = document.getElementById(COLLECT_BADGE_ID);
+    if (!collectBadgeEl) {
+      showCollectBadge();
+      return;
+    }
+    const remainEl = collectBadgeEl.querySelector(`.${COLLECT_REMAIN_CLASS}`);
+    if (remainEl) {
+      remainEl.textContent = formatHMS(Math.max(0, Math.ceil((state.collectUntil - now()) / 1000)));
+    }
+    const topicEl = collectBadgeEl.querySelector(`.${COLLECT_TOPIC_CLASS}`);
+    if (topicEl) topicEl.textContent = state.collectTopic;
+  }
+
+  function removeCollectBadge() {
+    if (collectBadgeEl) {
+      collectBadgeEl.remove();
+      collectBadgeEl = null;
+    } else {
+      const el = document.getElementById(COLLECT_BADGE_ID);
+      if (el) el.remove();
+    }
+  }
+
   function cancelLeisureMode() {
     state.mode = null;
     state.leisureUntil = 0;
@@ -1873,6 +2160,126 @@
     enforceSearchBan();
     scheduleUpdate();
     goHome();
+    updateModeIndicator();
+  }
+
+  function showCollectCompletionModal() {
+    if (collectReviewModalEl) return;
+    const topic = escapeHtml(state.collectTopic || "");
+    const purpose = escapeHtml(state.collectPurpose || "");
+    collectReviewModalEl = modal(
+      COLLECT_REVIEW_MODAL_ID,
+      `
+        <div class="fg-mode-sub">設定した時間が終了しました。結果を確認してください。</div>
+        <div class="fg-collect-summary">
+          <div><strong>調べた内容:</strong> ${topic || "-"}</div>
+          <div><strong>目的:</strong> ${purpose || "-"}</div>
+        </div>
+        <div class="fg-collect-actions">
+          <button type="button" class="fg-mode-btn primary" data-action="done">完了</button>
+          <button type="button" class="fg-mode-btn" data-action="extend">時間を追加する</button>
+        </div>
+      `,
+      (card) => {
+        const doneBtn = card.querySelector('[data-action="done"]');
+        const extendBtn = card.querySelector('[data-action="extend"]');
+        if (doneBtn) {
+          doneBtn.addEventListener("click", () => {
+            completeCollectSession(true);
+            removeCollectReviewModal();
+          });
+        }
+        if (extendBtn) {
+          extendBtn.addEventListener("click", () => {
+            state.collectNeedsReview = false;
+            save();
+            removeCollectReviewModal();
+            showCollectExtensionSetup();
+          });
+        }
+        doneBtn?.focus();
+      }
+    );
+  }
+
+  function removeCollectReviewModal() {
+    if (collectReviewModalEl) {
+      close(collectReviewModalEl);
+      collectReviewModalEl = null;
+    }
+  }
+
+  function showCollectExtensionSetup() {
+    const minutes = state.collectDurationSec ? Math.max(1, Math.round(state.collectDurationSec / 60)) : COLLECT_TIME_OPTIONS[0];
+    showCollectSetupModal({
+      initialTopic: state.collectTopic,
+      initialPurpose: state.collectPurpose,
+      initialMinutes: COLLECT_TIME_OPTIONS.includes(minutes) ? minutes : COLLECT_TIME_OPTIONS[0],
+      isExtension: true,
+    });
+  }
+
+  function completeCollectSession(success) {
+    removeCollectBadge();
+    removeCollectReviewModal();
+    closeCollectModal();
+    state.collectUntil = 0;
+    state.collectDurationSec = 0;
+    state.collectNeedsReview = false;
+    const topic = state.collectTopic;
+    const purpose = state.collectPurpose;
+    if (success) {
+      state.mode = null;
+      state.collectTopic = "";
+      state.collectPurpose = "";
+    }
+    save();
+    updateModeIndicator();
+    if (success) {
+      showCollectNotionPrompt(topic, purpose);
+    }
+  }
+
+  function showCollectNotionPrompt(topic, purpose) {
+    if (collectNotionModalEl) {
+      close(collectNotionModalEl);
+      collectNotionModalEl = null;
+    }
+    const topicText = escapeHtml(topic || "");
+    const purposeText = escapeHtml(purpose || "");
+    collectNotionModalEl = modal(
+      COLLECT_NOTION_MODAL_ID,
+      `
+        <div class="fg-mode-sub">情報整理を Notion などにまとめておきましょう。</div>
+        <div class="fg-collect-summary">
+          <div><strong>調べた内容:</strong> ${topicText || "-"}</div>
+          <div><strong>目的:</strong> ${purposeText || "-"}</div>
+        </div>
+        <div class="fg-collect-actions">
+          <button type="button" class="fg-mode-btn primary" data-action="ok">OK</button>
+        </div>
+      `,
+      (card, wrap) => {
+        wrap.addEventListener("click", (ev) => {
+          if (ev.target === wrap) {
+            closeCollectNotionModal();
+          }
+        });
+        const okBtn = card.querySelector('[data-action="ok"]');
+        okBtn?.addEventListener("click", () => {
+          closeCollectNotionModal();
+        });
+        okBtn?.focus();
+      }
+    );
+  }
+
+  function closeCollectNotionModal() {
+    if (collectNotionModalEl) {
+      close(collectNotionModalEl);
+      collectNotionModalEl = null;
+    }
+    updateModeIndicator();
   }
 
   function incrementLeisureWatch() {
@@ -1972,6 +2379,70 @@
     const s = total % 60;
     const pad = (n) => String(n).padStart(2, "0");
     return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
+  function isCollectActive() {
+    return state.collectUntil > now();
+  }
+
+  function ensureModeIndicator() {
+    if (!document.body) return null;
+    if (!modeIndicatorEl) {
+      modeIndicatorEl = document.createElement("div");
+      modeIndicatorEl.id = MODE_INDICATOR_ID;
+      modeIndicatorEl.className = "fg-mode-indicator";
+      document.body.appendChild(modeIndicatorEl);
+    }
+    return modeIndicatorEl;
+  }
+
+  function removeModeIndicator() {
+    if (modeIndicatorEl) {
+      modeIndicatorEl.remove();
+      modeIndicatorEl = null;
+    } else {
+      const el = document.getElementById(MODE_INDICATOR_ID);
+      if (el) el.remove();
+    }
+  }
+
+  function updateModeIndicator() {
+    const mode = state.mode;
+    const leisureActive = isLeisureActive();
+    const collectActive = isCollectActive();
+    const needsReview = state.collectNeedsReview && state.collectTopic;
+    if (!mode && !leisureActive && !collectActive && !needsReview) {
+      removeModeIndicator();
+      return;
+    }
+    const el = ensureModeIndicator();
+    if (!el) return;
+
+    let text = "";
+    if (mode === "study") {
+      text = "現在モード: 学習";
+    } else if (mode === "leisure" || leisureActive) {
+      const remain = leisureActive ? formatHMS(Math.max(0, Math.ceil((state.leisureUntil - now()) / 1000))) : "完了";
+      text = leisureActive ? `現在モード: 娯楽（残り ${remain}）` : "現在モード: 娯楽";
+    } else if (mode === "collect" || collectActive || needsReview) {
+      const topic = state.collectTopic ? `「${state.collectTopic}」` : "";
+      if (collectActive) {
+        const remain = formatHMS(Math.max(0, Math.ceil((state.collectUntil - now()) / 1000)));
+        text = `現在モード: 情報収集${topic ? ` ${topic}` : ""}（残り ${remain}）`;
+      } else if (needsReview) {
+        text = `情報収集の確認待ち${topic ? ` ${topic}` : ""}`;
+      } else {
+        text = `現在モード: 情報収集${topic ? ` ${topic}` : ""}`;
+      }
+    } else if (mode === "leisure") {
+      text = "現在モード: 娯楽";
+    } else if (mode === "collect") {
+      text = "現在モード: 情報収集";
+    } else {
+      text = "現在モード: -";
+    }
+
+    el.textContent = text;
   }
 
   function todayKey() {
@@ -2205,6 +2676,10 @@
         outline: none;
         box-shadow: 0 0 0 2px rgba(86, 141, 255, 0.6);
       }
+      .fg-mode-btn.selected {
+        background: #3166f0;
+        border-color: rgba(120, 170, 255, 0.6);
+      }
       .fg-mode-btn.primary {
         background: #2b5bd7;
       }
@@ -2260,6 +2735,92 @@
       #fg-leisure-badge .${LEISURE_STOP_CLASS}:hover {
         background: rgba(65, 88, 152, 0.9);
         transform: translateY(-1px);
+      }
+      #${MODE_INDICATOR_ID} {
+        position: fixed;
+        top: 72px;
+        left: 18px;
+        z-index: 2147483500;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: rgba(20, 24, 35, 0.88);
+        color: #f2f5ff;
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+      }
+      .fg-collect-badge {
+        right: 18px;
+        bottom: 94px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+      }
+      .fg-collect-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .fg-collect-row .${COLLECT_TOPIC_CLASS} {
+        font-weight: 700;
+      }
+      .fg-collect-label {
+        opacity: 0.85;
+      }
+      .fg-collect-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .fg-collect-btn {
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(55, 74, 120, 0.8);
+        color: #f3f5ff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .fg-collect-btn:hover {
+        background: rgba(75, 98, 150, 0.9);
+        transform: translateY(-1px);
+      }
+      .fg-collect-field label {
+        font-size: 12px;
+        opacity: 0.75;
+      }
+      .fg-collect-time-picker {
+        flex-wrap: wrap;
+      }
+      .fg-collect-input,
+      .fg-collect-purpose {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(20, 22, 33, 0.9);
+        color: #f2f5ff;
+        font-size: 15px;
+        resize: vertical;
+      }
+      .fg-collect-input:focus,
+      .fg-collect-purpose:focus {
+        outline: none;
+        border-color: rgba(98, 146, 255, 0.7);
+        box-shadow: 0 0 0 2px rgba(98, 146, 255, 0.35);
+      }
+      .fg-collect-summary {
+        margin: 14px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 14px;
       }
       #fg-ban-badge {
         left: 18px;
@@ -2378,22 +2939,32 @@
   }
 
   function load() {
-    const fallback = {
-      mode: null,
-      leisureUntil: 0,
-      searchBanUntil: 0,
-      leisureDurationSec: 0
-    };
+  const fallback = {
+    mode: null,
+    leisureUntil: 0,
+    searchBanUntil: 0,
+    leisureDurationSec: 0,
+    collectUntil: 0,
+    collectDurationSec: 0,
+    collectTopic: "",
+    collectPurpose: "",
+    collectNeedsReview: false
+  };
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return fallback;
       const parsed = JSON.parse(raw);
-      return {
-        mode: typeof parsed.mode === "string" ? parsed.mode : null,
-        leisureUntil: Number(parsed.leisureUntil) || 0,
-        searchBanUntil: Number(parsed.searchBanUntil) || 0,
-        leisureDurationSec: Number(parsed.leisureDurationSec) || 0
-      };
+    return {
+      mode: typeof parsed.mode === "string" ? parsed.mode : null,
+      leisureUntil: Number(parsed.leisureUntil) || 0,
+      searchBanUntil: Number(parsed.searchBanUntil) || 0,
+      leisureDurationSec: Number(parsed.leisureDurationSec) || 0,
+      collectUntil: Number(parsed.collectUntil) || 0,
+      collectDurationSec: Number(parsed.collectDurationSec) || 0,
+      collectTopic: typeof parsed.collectTopic === "string" ? parsed.collectTopic : "",
+      collectPurpose: typeof parsed.collectPurpose === "string" ? parsed.collectPurpose : "",
+      collectNeedsReview: Boolean(parsed.collectNeedsReview)
+    };
     } catch {
       return fallback;
     }
