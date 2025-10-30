@@ -28,7 +28,11 @@
     ENABLE_SUMMARY_PANEL: true,
     // 再生ページのおすすめ欄（サイドバー）を隠す
     HIDE_RECOMMENDATIONS: true,
+    // 動画プレイヤー以外の要素を隠す
+    HIDE_NON_VIDEO_SECTIONS: true,
   };
+
+  const ONLY_PLAYER_CLASS = "yt-only-player";
 
   const CATEGORIES = [
     {
@@ -428,6 +432,78 @@
     }
   }
   `);
+
+  if (CONFIG.HIDE_NON_VIDEO_SECTIONS) {
+    style(`
+    .${ONLY_PLAYER_CLASS} body {
+      background: #000 !important;
+      overflow-x: hidden !important;
+      overflow-y: hidden !important;
+    }
+    .${ONLY_PLAYER_CLASS} ytd-app,
+    .${ONLY_PLAYER_CLASS} ytm-app,
+    .${ONLY_PLAYER_CLASS} #content {
+      background: #000 !important;
+    }
+    .${ONLY_PLAYER_CLASS} ytd-app #masthead-container,
+    .${ONLY_PLAYER_CLASS} ytd-masthead,
+    .${ONLY_PLAYER_CLASS} ytd-mini-guide-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-guide-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #below,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #meta,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #info,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #description,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #details,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #chat,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #secondary,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #comments,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-watch-metadata,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-video-owner-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-engagement-panel-section-list-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-merch-shelf-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-compact-autoplay-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-watch-next-secondary-results-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-compact-video-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy ytd-reel-shelf-renderer,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #more-recommendations,
+    .${ONLY_PLAYER_CLASS} .ytp-endscreen-content,
+    .${ONLY_PLAYER_CLASS} #guide,
+    .${ONLY_PLAYER_CLASS} #related {
+      display: none !important;
+    }
+    .${ONLY_PLAYER_CLASS} ytm-mobile-topbar-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-pivot-bar-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-section-list-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-single-column-watch-next-results-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-watch-metadata,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-item-section-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-comments-entry-point,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-comment-section-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-engagement-panel-section-list-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-compact-video-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-compact-video-list-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-reel-shelf-renderer,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy ytm-button-renderer:not(#player *),
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy .pivot-bar-container,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy .metadata-container,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #columns,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #header-bar,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #description,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #info,
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #related {
+      display: none !important;
+    }
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy {
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    .${ONLY_PLAYER_CLASS} ytm-watch-flexy #player,
+    .${ONLY_PLAYER_CLASS} ytd-watch-flexy #player {
+      margin: 0 auto !important;
+      max-width: 100vw !important;
+    }
+    `);
+  }
 
   function ensureWatchOverlay() {
     if (!CONFIG.SHOW_WATCH_OVERLAY) return null;
@@ -962,6 +1038,68 @@
     });
   }
 
+  function hideNonVideoSections() {
+    if (!CONFIG.HIDE_NON_VIDEO_SECTIONS) {
+      document.documentElement.classList.remove(ONLY_PLAYER_CLASS);
+      return;
+    }
+    const path = location.pathname || "";
+    const isWatch = /^\/watch/.test(path) || isShorts();
+    if (!isWatch) {
+      document.documentElement.classList.remove(ONLY_PLAYER_CLASS);
+      return;
+    }
+    document.documentElement.classList.add(ONLY_PLAYER_CLASS);
+    const selectors = [
+      "ytd-watch-flexy #below",
+      "ytd-watch-flexy #meta",
+      "ytd-watch-flexy #info",
+      "ytd-watch-flexy #description",
+      "ytd-watch-flexy #details",
+      "ytd-watch-flexy #related",
+      "ytd-watch-flexy #chat",
+      "ytd-watch-flexy #comments",
+      "ytd-watch-flexy ytd-watch-metadata",
+      "ytd-watch-flexy ytd-watch-next-secondary-results-renderer",
+      "ytd-watch-flexy ytd-merch-shelf-renderer",
+      "ytd-watch-flexy ytd-compact-autoplay-renderer",
+      "ytd-watch-flexy ytd-compact-video-renderer",
+      "ytd-watch-flexy ytd-reel-shelf-renderer",
+      "ytd-watch-flexy ytd-app-promo-renderer",
+      "ytd-watch-flexy ytd-engagement-panel-section-list-renderer",
+      "#masthead-container",
+      "ytd-masthead",
+      "ytd-mini-guide-renderer",
+      "ytd-guide-renderer",
+      "ytm-mobile-topbar-renderer",
+      "ytm-pivot-bar-renderer",
+      "ytm-watch-flexy ytm-watch-metadata",
+      "ytm-watch-flexy ytm-item-section-renderer",
+      "ytm-watch-flexy ytm-single-column-watch-next-results-renderer",
+      "ytm-watch-flexy ytm-comments-entry-point",
+      "ytm-watch-flexy ytm-comment-section-renderer",
+      "ytm-watch-flexy ytm-engagement-panel-section-list-renderer",
+      "ytm-watch-flexy ytm-compact-video-renderer",
+      "ytm-watch-flexy ytm-compact-video-list-renderer",
+      "ytm-watch-flexy ytm-reel-shelf-renderer",
+      "ytm-watch-flexy #info",
+      "ytm-watch-flexy #description",
+      "ytm-watch-flexy #menu",
+      "ytm-watch-flexy #related",
+    ];
+    selectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (!node) return;
+        if (node.closest("#player")) return;
+        if (typeof node.remove === "function") {
+          node.remove();
+        } else if (node.parentNode) {
+          node.parentNode.removeChild(node);
+        }
+      });
+    });
+  }
+
   /** ============== イベントハンドラ ============== */
   function onVideoPlay(e) {
     const el = e.target;
@@ -1010,6 +1148,7 @@
       }
       hideShortsUI();
       hideRecommendationsUI();
+      hideNonVideoSections();
       updateWatchOverlay();
       const vid = getVideoId();
       const key = currentVideoKey();
@@ -1046,12 +1185,14 @@
 
   hideShortsUI();
   hideRecommendationsUI();
+  hideNonVideoSections();
   updateWatchOverlay();
 
-  if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS) {
+  if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS || CONFIG.HIDE_NON_VIDEO_SECTIONS) {
     const cleaner = new MutationObserver(() => {
       hideShortsUI();
       hideRecommendationsUI();
+      hideNonVideoSections();
     });
     cleaner.observe(document.documentElement, { childList: true, subtree: true });
     if (CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) {
