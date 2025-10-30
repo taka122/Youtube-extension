@@ -37,6 +37,8 @@
     SHOW_WATCH_OVERLAY: true,
     // 集計パネルを有効化
     ENABLE_SUMMARY_PANEL: true,
+    // 再生ページのおすすめ欄（サイドバー）を隠す
+    HIDE_RECOMMENDATIONS: true,
   };
 
   /** ============== 便利関数・状態管理 ============== */
@@ -771,6 +773,35 @@
     });
   }
 
+  function hideRecommendationsUI() {
+    if (!CONFIG.HIDE_RECOMMENDATIONS) return;
+    const path = location.pathname || "";
+    if (!/^\/watch/.test(path)) return;
+    const selectors = [
+      "#secondary",
+      "#related",
+      "ytd-watch-next-secondary-results-renderer",
+      "ytd-compact-autoplay-renderer",
+      "ytd-compact-playlist-renderer",
+      "ytd-compact-promoted-item-renderer",
+      "ytd-compact-video-renderer",
+      'ytd-item-section-renderer[section-identifier="watch-next-results"]',
+      "ytm-single-column-watch-next-results-renderer",
+      'ytm-item-section-renderer[section-identifier="watch-next-results"]',
+      "ytm-watch-flexy #related",
+      "ytm-watch-flexy ytm-item-section-renderer",
+      "ytm-compact-video-renderer",
+      "ytm-compact-video-list-renderer",
+    ];
+    selectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (node && node.parentNode) {
+          node.remove();
+        }
+      });
+    });
+  }
+
   /** ============== SPA(YouTube) への対応 ============== */
   // 1) play/pauseをグローバル監視してブロック
   document.addEventListener("play", onVideoPlay, true);
@@ -787,6 +818,7 @@
         return;
       }
       hideShortsUI();
+      hideRecommendationsUI();
       updateWatchOverlay();
       // 新しい動画では再入力を要求
       const vid = getVideoId();
@@ -829,23 +861,27 @@
   videoReady.observe(document.documentElement, { childList: true, subtree: true });
 
   hideShortsUI();
+  hideRecommendationsUI();
   updateWatchOverlay();
 
-  if (CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) {
+  if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS) {
     const cleaner = new MutationObserver(() => {
       hideShortsUI();
+      hideRecommendationsUI();
     });
     cleaner.observe(document.documentElement, { childList: true, subtree: true });
-    document.addEventListener("click", (e) => {
-      const target = e.target;
-      if (!target || typeof target.closest !== "function") return;
-      const shortLink = target.closest('a[href^="/shorts"], a[href*="://www.youtube.com/shorts"]');
-      if (shortLink) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleShortsVisit();
-      }
-    }, true);
+    if (CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) {
+      document.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!target || typeof target.closest !== "function") return;
+        const shortLink = target.closest('a[href^="/shorts"], a[href*="://www.youtube.com/shorts"]');
+        if (shortLink) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleShortsVisit();
+        }
+      }, true);
+    }
   }
 
   // 4) ページ離脱時にカウント終了
@@ -1523,9 +1559,7 @@
   const MODE_INDICATOR_ID = "fg-mode-indicator";
   const BAN_BADGE_ID = "fg-ban-badge";
   const TOAST_ID = "fg-ban-toast";
-  const LEISURE_STOP_LABEL = "中断";
   const LEISURE_REMAIN_CLASS = "fg-leisure-remaining";
-  const LEISURE_STOP_CLASS = "fg-leisure-stop";
   const COLLECT_REMAIN_CLASS = "fg-collect-remaining";
   const COLLECT_EXTEND_CLASS = "fg-collect-extend";
   const COLLECT_DONE_CLASS = "fg-collect-done";
@@ -2045,12 +2079,7 @@
       <div class="fg-leisure-label">
         娯楽 残り <span class="${LEISURE_REMAIN_CLASS}">${fmt(getRemainingSec(state.leisureUntil))}</span>
       </div>
-      <button type="button" class="${LEISURE_STOP_CLASS}">${LEISURE_STOP_LABEL}</button>
     `;
-    const stopBtn = leisureBadgeEl.querySelector(`.${LEISURE_STOP_CLASS}`);
-    if (stopBtn) {
-      stopBtn.addEventListener("click", cancelLeisureMode);
-    }
     document.body.appendChild(leisureBadgeEl);
   }
 
@@ -2145,22 +2174,6 @@
       const el = document.getElementById(COLLECT_BADGE_ID);
       if (el) el.remove();
     }
-  }
-
-  function cancelLeisureMode() {
-    state.mode = null;
-    state.leisureUntil = 0;
-    state.leisureDurationSec = 0;
-    state.searchBanUntil = 0;
-    lastLeisureIncrementSec = 0;
-    save();
-    removeLeisureBadge();
-    removeBanBadge();
-    removeBanToast();
-    enforceSearchBan();
-    scheduleUpdate();
-    goHome();
-    updateModeIndicator();
   }
 
   function showCollectCompletionModal() {
@@ -2720,21 +2733,6 @@
       }
       #fg-leisure-badge .${LEISURE_REMAIN_CLASS} {
         font-variant-numeric: tabular-nums;
-      }
-      #fg-leisure-badge .${LEISURE_STOP_CLASS} {
-        padding: 6px 12px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        background: rgba(45, 63, 112, 0.8);
-        color: #f3f5ff;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.2s ease, transform 0.2s ease;
-      }
-      #fg-leisure-badge .${LEISURE_STOP_CLASS}:hover {
-        background: rgba(65, 88, 152, 0.9);
-        transform: translateY(-1px);
       }
       #${MODE_INDICATOR_ID} {
         position: fixed;
