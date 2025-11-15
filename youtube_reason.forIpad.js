@@ -35,6 +35,19 @@
   const ONLY_PLAYER_CLASS = "yt-only-player";
   const SUBSCRIPTIONS_MAX_VISIBLE = 3;
   const SUBSCRIPTION_HIDDEN_ATTR = "data-yt-subs-hidden";
+  const SEARCH_HIDDEN_ATTR = "data-yt-search-hidden";
+  const SEARCH_SELECTORS = [
+    "ytd-searchbox",
+    "ytd-masthead #center",
+    "#masthead-search",
+    "#search-form",
+    "form#search-form",
+    "ytm-search-box",
+    "ytm-search",
+    "ytm-masthead .search-box",
+    "ytm-search-page",
+    "#search-icon-legacy",
+  ];
 
   const CATEGORIES = [
     {
@@ -514,6 +527,57 @@
       max-width: 100vw !important;
     }
     `);
+  }
+
+  function hideSearchBars() {
+    SEARCH_SELECTORS.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        node.setAttribute(SEARCH_HIDDEN_ATTR, "1");
+        node.style.setProperty("display", "none", "important");
+        node.style.setProperty("visibility", "hidden", "important");
+        node.style.setProperty("opacity", "0", "important");
+        node.style.setProperty("pointer-events", "none", "important");
+        if (typeof node.blur === "function") {
+          try {
+            node.blur();
+          } catch {
+            /* noop */
+          }
+        }
+      });
+    });
+    document
+      .querySelectorAll('input#search, input#search-input, input[name="search_query"], input[type="search"], ytd-searchbox input, form#search-form input')
+      .forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        node.setAttribute(SEARCH_HIDDEN_ATTR, "1");
+        node.style.setProperty("display", "none", "important");
+        node.style.setProperty("visibility", "hidden", "important");
+        node.style.setProperty("opacity", "0", "important");
+        node.style.setProperty("pointer-events", "none", "important");
+        if ("value" in node) {
+          try {
+            node.value = "";
+          } catch {
+            /* noop */
+          }
+        }
+        if (typeof node.blur === "function") {
+          try {
+            node.blur();
+          } catch {
+            /* noop */
+          }
+        }
+      });
+  }
+
+  let searchBarEnforcer = null;
+  function ensureSearchBarEnforcer() {
+    if (searchBarEnforcer) return;
+    searchBarEnforcer = setInterval(hideSearchBars, 600);
+    hideSearchBars();
   }
 
   function ensureWatchOverlay() {
@@ -1112,6 +1176,7 @@
   }
 
   let subscriptionsLimitTimer = null;
+  let subscriptionsEnforcer = null;
 
   function collectSubscriptionItems() {
     const selectors = [
@@ -1176,6 +1241,14 @@
       subscriptionsLimitTimer = null;
       limitSubscriptionsFeed();
     }, 120);
+  }
+
+  function ensureSubscriptionsEnforcer() {
+    if (subscriptionsEnforcer) return;
+    subscriptionsEnforcer = setInterval(() => {
+      limitSubscriptionsFeed();
+    }, 800);
+    limitSubscriptionsFeed();
   }
 
   /** ============== イベントハンドラ ============== */
@@ -1244,6 +1317,7 @@
         handleShortsVisit();
         return;
       }
+      hideSearchBars();
       hideShortsUI();
       hideRecommendationsUI();
       hideNonVideoSections();
@@ -1292,12 +1366,16 @@
   hideShortsUI();
   hideRecommendationsUI();
   hideNonVideoSections();
+  hideSearchBars();
   updateWatchOverlay();
   limitSubscriptionsFeed();
+  ensureSearchBarEnforcer();
+  ensureSubscriptionsEnforcer();
   blockUserChannelPage();
 
   if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS || CONFIG.HIDE_NON_VIDEO_SECTIONS) {
     const cleaner = new MutationObserver(() => {
+      hideSearchBars();
       hideShortsUI();
       hideRecommendationsUI();
       hideNonVideoSections();
@@ -1322,5 +1400,15 @@
     }
   }
 
-  window.addEventListener("beforeunload", stopTick);
+  window.addEventListener("beforeunload", () => {
+    stopTick();
+    if (searchBarEnforcer) {
+      clearInterval(searchBarEnforcer);
+      searchBarEnforcer = null;
+    }
+    if (subscriptionsEnforcer) {
+      clearInterval(subscriptionsEnforcer);
+      subscriptionsEnforcer = null;
+    }
+  });
 })();
