@@ -33,6 +33,8 @@
   };
 
   const ONLY_PLAYER_CLASS = "yt-only-player";
+  const SUBSCRIPTIONS_MAX_VISIBLE = 3;
+  const SUBSCRIPTION_HIDDEN_ATTR = "data-yt-subs-hidden";
 
   const CATEGORIES = [
     {
@@ -200,6 +202,15 @@
   }
 
   style(`
+  ytd-searchbox,
+  ytd-masthead #center,
+  #masthead-search,
+  #search-form,
+  ytm-search-box,
+  ytm-search,
+  ytm-masthead .search-box {
+    display: none !important;
+  }
   .yt-reason-backdrop {
     position: fixed;
     inset: 0;
@@ -1100,6 +1111,73 @@
     });
   }
 
+  let subscriptionsLimitTimer = null;
+
+  function collectSubscriptionItems() {
+    const selectors = [
+      "ytd-two-column-browse-results-renderer[page-subtype='subscriptions'] ytd-item-section-renderer",
+      "ytd-two-column-browse-results-renderer[page-subtype='subscriptions'] ytd-rich-item-renderer",
+      "ytd-section-list-renderer[page-subtype='subscriptions'] ytd-item-section-renderer",
+      "ytd-rich-grid-renderer[page-subtype='subscriptions'] ytd-rich-item-renderer",
+      "ytd-rich-grid-renderer ytd-rich-item-renderer",
+      "ytm-section-list-renderer[page-subtype='subscriptions'] ytm-item-section-renderer",
+      "ytm-rich-grid-row ytm-rich-item-renderer",
+      "ytm-section-list-renderer[page-subtype='subscriptions'] ytm-item",
+    ];
+    const seen = new Set();
+    const nodes = [];
+    selectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((node) => {
+        if (!node || seen.has(node)) return;
+        seen.add(node);
+        nodes.push(node);
+      });
+    });
+    return nodes;
+  }
+
+  function limitSubscriptionsFeed() {
+    const limit = Math.max(0, Number(SUBSCRIPTIONS_MAX_VISIBLE) || 0);
+    const path = location.pathname || "";
+    const isSubscriptions = /^\/feed\/subscriptions/.test(path);
+    const hiddenNodes = document.querySelectorAll(`[${SUBSCRIPTION_HIDDEN_ATTR}]`);
+    if (!isSubscriptions || limit === 0) {
+      hiddenNodes.forEach((node) => {
+        node.style.removeProperty("display");
+        node.removeAttribute(SUBSCRIPTION_HIDDEN_ATTR);
+      });
+      return;
+    }
+
+    const items = collectSubscriptionItems().filter((node) => {
+      if (!node || node.nodeType !== 1) return false;
+      if (node.matches("ytd-continuation-item-renderer, ytm-continuation-item-renderer")) return false;
+      return true;
+    });
+
+    let visibleCount = 0;
+    items.forEach((node) => {
+      if (visibleCount < limit) {
+        visibleCount += 1;
+        if (node.hasAttribute(SUBSCRIPTION_HIDDEN_ATTR)) {
+          node.style.removeProperty("display");
+          node.removeAttribute(SUBSCRIPTION_HIDDEN_ATTR);
+        }
+        return;
+      }
+      node.setAttribute(SUBSCRIPTION_HIDDEN_ATTR, "1");
+      node.style.setProperty("display", "none", "important");
+    });
+  }
+
+  function scheduleLimitSubscriptions() {
+    if (subscriptionsLimitTimer) return;
+    subscriptionsLimitTimer = setTimeout(() => {
+      subscriptionsLimitTimer = null;
+      limitSubscriptionsFeed();
+    }, 120);
+  }
+
   /** ============== イベントハンドラ ============== */
   function onVideoPlay(e) {
     const el = e.target;
@@ -1133,6 +1211,26 @@
     stopTick();
   }
 
+  // ユーザーチャンネルページへのアクセス・リンクブロック
+  function blockUserChannelPage() {
+    const path = location.pathname || "";
+    if (path.startsWith("/@")) {
+      location.replace("/feed/subscriptions");
+    }
+
+    document.addEventListener("click", (e) => {
+      const t = e.target;
+      if (!t || typeof t.closest !== "function") return;
+
+      const link = t.closest('a[href^="/@"]');
+      if (link) {
+        e.preventDefault();
+        e.stopPropagation();
+        location.replace("/feed/subscriptions");
+      }
+    }, true);
+  }
+
   /** ============== SPA 対応 ============== */
   document.addEventListener("play", onVideoPlay, true);
   document.addEventListener("pause", onVideoPause, true);
@@ -1150,6 +1248,8 @@
       hideRecommendationsUI();
       hideNonVideoSections();
       updateWatchOverlay();
+      limitSubscriptionsFeed();
+      blockUserChannelPage();
       const vid = getVideoId();
       const key = currentVideoKey();
       const approved = load(STORAGE_KEYS.approved, {});
@@ -1183,16 +1283,25 @@
   });
   videoReady.observe(document.documentElement, { childList: true, subtree: true });
 
+  const subscriptionsObserver = new MutationObserver(() => {
+    if (!/^\/feed\/subscriptions/.test(location.pathname || "")) return;
+    scheduleLimitSubscriptions();
+  });
+  subscriptionsObserver.observe(document.documentElement, { childList: true, subtree: true });
+
   hideShortsUI();
   hideRecommendationsUI();
   hideNonVideoSections();
   updateWatchOverlay();
+  limitSubscriptionsFeed();
+  blockUserChannelPage();
 
   if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS || CONFIG.HIDE_NON_VIDEO_SECTIONS) {
     const cleaner = new MutationObserver(() => {
       hideShortsUI();
       hideRecommendationsUI();
       hideNonVideoSections();
+      limitSubscriptionsFeed();
     });
     cleaner.observe(document.documentElement, { childList: true, subtree: true });
     if (CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) {

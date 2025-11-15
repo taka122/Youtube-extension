@@ -1771,7 +1771,6 @@
         <div class="fg-mode-sub">目的を決めてから検索しましょう。</div>
         <div class="fg-mode-buttons">
           <button type="button" class="fg-mode-btn" data-mode="study">学習</button>
-          <button type="button" class="fg-mode-btn" data-mode="collect">情報収集</button>
           <button type="button" class="fg-mode-btn primary" data-mode="leisure">娯楽</button>
           <button type="button" class="fg-mode-btn danger" data-mode="cancel">キャンセル</button>
         </div>
@@ -2724,6 +2723,9 @@
         display: flex;
         align-items: center;
         gap: 12px;
+      }
+      #fg-leisure-badge button {
+        display: none !important;
       }
       #fg-leisure-badge .fg-leisure-label {
         display: flex;
