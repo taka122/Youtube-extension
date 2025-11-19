@@ -16,6 +16,7 @@ There is English Guide below
 	•	その日の合計視聴時間を常時表示する オーバーレイ と、履歴を一覧できる 集計パネル
 	•	学習以外の視聴時間に 1 日上限 を設定し、超過時は再生ブロック
 	•	YouTube Shorts の自動ブロック／リダイレクト、関連 UI の非表示
+	•	ホーム画面のアイコン／ロゴを完全に隠し、https://www.youtube.com/ へアクセスした場合は常に /feed/subscriptions に自動リダイレクト
 	•	検索バーにフォーカスすると「学習／娯楽／情報収集」モードの選択を強制
 	•	娯楽モードでは 5/10/15 分タイマー＋終了後の検索禁止モードを自動適用
 	•	モードインジケーターで現在のモードや残り時間を常時表示
@@ -143,6 +144,9 @@ localStorage.removeItem('fg_daily_purpose_v1');
 		◦	検索モードモーダルの選択肢から「情報収集」を削除し、学習か娯楽のいずれかに集中できるよう仕様を簡素化
 		◦	娯楽モードの残り時間バッジから「中断」ボタンを撤去し、設定した時間までは観続けず待つ運用に統一
 		◦	iPad 向けスクリプト（youtube_reason.forIpad.js）を追加し、検索バーを全面非表示 & Subscriptions タブの表示動画/チャンネルを最新3件だけに制限
+	•	2025/11/19
+		◦	iPad 版でホームアイコン／ロゴを完全に隠し、ホームへのリンクをすべて無効化
+		◦	https://www.youtube.com/ へアクセスした際は常に /feed/subscriptions へリダイレクトする強制遷移を追加
 
 ⸻
 
@@ -174,6 +178,7 @@ Key Features
 	•	Overlay showing daily total watch time and a summary panel listing history and reasons
 	•	Ability to set a daily time cap for non-learning categories, blocking playback once exceeded
 	•	Block/redirect YouTube Shorts and hide related UI elements
+	•	Completely hide the Home icons/logos and force any visit to https://www.youtube.com/ to redirect to /feed/subscriptions
 	•	Force-select a viewing mode (Learning / Leisure / Research) whenever the search bar is focused
 	•	Start a 5/10/15 minute leisure timer and trigger a search-ban cooldown once the timer ends
 	•	Show a persistent mode indicator with the active mode and remaining timers
