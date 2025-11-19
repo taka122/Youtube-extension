@@ -48,6 +48,27 @@
     "ytm-search-page",
     "#search-icon-legacy",
   ];
+  const HOME_ICON_HIDDEN_ATTR = "data-yt-home-hidden";
+  const HOME_CONTAINER_SELECTOR = [
+    "ytd-mini-guide-entry-renderer",
+    "ytd-guide-entry-renderer",
+    "ytm-guide-entry-renderer",
+    "ytm-pivot-bar-item-renderer",
+    "ytm-tab-bar-item-renderer",
+    "ytm-compact-link-renderer",
+  ].join(", ");
+  const HOME_LOGO_SELECTORS = [
+    "#logo",
+    "a#logo",
+    "ytd-topbar-logo-renderer",
+    "ytm-topbar-logo-renderer",
+    "ytm-masthead #logo",
+    "ytm-mobile-topbar-renderer #logo",
+    "ytm-mobile-topbar-renderer ytm-logo",
+    "ytm-app #logo",
+  ].join(", ");
+  const HOME_TEXT_PATTERN = /(home|ホーム)/i;
+  const HOME_REDIRECT_TARGET = "https://www.youtube.com/feed/subscriptions";
 
   const CATEGORIES = [
     {
@@ -75,6 +96,10 @@
       placeholder: "例: 気になるニュースをチェック など",
     },
   ];
+
+  if (redirectHomeToSubscriptions()) {
+    return;
+  }
 
   /** ============== 便利関数・状態管理 ============== */
   const isShorts = () => location.pathname.startsWith("/shorts");
@@ -1084,6 +1109,28 @@
     });
   }
 
+  function redirectHomeToSubscriptions() {
+    if (!HOME_REDIRECT_TARGET) return false;
+    const path = location.pathname || "/";
+    const isHome = path === "/" || path === "";
+    if (!isHome) return false;
+    try {
+      const current = new URL(location.href);
+      const target = new URL(HOME_REDIRECT_TARGET, current.origin);
+      if (
+        current.hostname === target.hostname &&
+        current.pathname === target.pathname &&
+        current.search === target.search
+      ) {
+        return false;
+      }
+      location.replace(target.href);
+    } catch {
+      location.replace(HOME_REDIRECT_TARGET);
+    }
+    return true;
+  }
+
   function hideRecommendationsUI() {
     if (!CONFIG.HIDE_RECOMMENDATIONS) return;
     const path = location.pathname || "";
@@ -1111,6 +1158,72 @@
         }
       });
     });
+  }
+
+  function hideHomeIcons() {
+    const hideNode = (node) => {
+      if (!(node instanceof HTMLElement)) return;
+      if (node.hasAttribute(HOME_ICON_HIDDEN_ATTR)) return;
+      node.setAttribute(HOME_ICON_HIDDEN_ATTR, "1");
+      node.setAttribute("aria-hidden", "true");
+      node.style.setProperty("display", "none", "important");
+      node.style.setProperty("visibility", "hidden", "important");
+      node.style.setProperty("opacity", "0", "important");
+      node.style.setProperty("pointer-events", "none", "important");
+    };
+
+    const homeLinkSelectors = [
+      'a[href="/"]',
+      'a[href="https://www.youtube.com/"]',
+      'a[href="https://m.youtube.com/"]',
+      'a[href="https://www.youtube.com/?app=desktop"]',
+      'a[href="https://m.youtube.com/?app=desktop"]',
+    ].join(", ");
+
+    document.querySelectorAll(homeLinkSelectors).forEach((anchor) => {
+      if (!(anchor instanceof HTMLElement)) return;
+      const container =
+        (HOME_CONTAINER_SELECTOR && anchor.closest(HOME_CONTAINER_SELECTOR)) ||
+        (HOME_LOGO_SELECTORS && anchor.closest(HOME_LOGO_SELECTORS));
+      if (container) {
+        hideNode(container);
+      } else {
+        hideNode(anchor);
+      }
+    });
+
+    if (HOME_CONTAINER_SELECTOR) {
+      document.querySelectorAll(HOME_CONTAINER_SELECTOR).forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.hasAttribute(HOME_ICON_HIDDEN_ATTR)) return;
+        const link = node.querySelector("a[href]");
+        const labels = [
+          node.getAttribute("title"),
+          node.getAttribute("aria-label"),
+          node.textContent,
+          link ? link.getAttribute("title") : "",
+          link ? link.getAttribute("aria-label") : "",
+          link ? link.textContent : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        if (labels && HOME_TEXT_PATTERN.test(labels)) {
+          hideNode(node);
+          return;
+        }
+        if (link instanceof HTMLAnchorElement && link.getAttribute("href") === "/") {
+          hideNode(node);
+        }
+      });
+    }
+
+    if (HOME_LOGO_SELECTORS) {
+      document.querySelectorAll(HOME_LOGO_SELECTORS).forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        hideNode(node);
+      });
+    }
   }
 
   function hideNonVideoSections() {
@@ -1317,7 +1430,11 @@
         handleShortsVisit();
         return;
       }
+      if (redirectHomeToSubscriptions()) {
+        return;
+      }
       hideSearchBars();
+      hideHomeIcons();
       hideShortsUI();
       hideRecommendationsUI();
       hideNonVideoSections();
@@ -1367,6 +1484,7 @@
   hideRecommendationsUI();
   hideNonVideoSections();
   hideSearchBars();
+  hideHomeIcons();
   updateWatchOverlay();
   limitSubscriptionsFeed();
   ensureSearchBarEnforcer();
@@ -1376,6 +1494,7 @@
   if ((CONFIG.BLOCK_SHORTS && CONFIG.HIDE_SHORTS_UI) || CONFIG.HIDE_RECOMMENDATIONS || CONFIG.HIDE_NON_VIDEO_SECTIONS) {
     const cleaner = new MutationObserver(() => {
       hideSearchBars();
+      hideHomeIcons();
       hideShortsUI();
       hideRecommendationsUI();
       hideNonVideoSections();
