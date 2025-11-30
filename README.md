@@ -11,18 +11,11 @@ There is English Guide below
 ⸻
 
 主な機能
-	•	再生前にカテゴリ＋理由入力を必須化（最小文字数は設定可能）
-	•	入力内容に基づき 「学習」「娯楽」「その他」 の視聴時間を 日別で自動計測
-	•	その日の合計視聴時間を常時表示する オーバーレイ と、履歴を一覧できる 集計パネル
-	•	学習以外の視聴時間に 1 日上限 を設定し、超過時は再生ブロック
-	•	YouTube Shorts の自動ブロック／リダイレクト、関連 UI の非表示
-	•	ホーム画面のアイコン／ロゴを完全に隠し、https://www.youtube.com/ へアクセスした場合は常に /feed/subscriptions に自動リダイレクト
-	•	検索バーにフォーカスすると「学習／娯楽／情報収集」モードの選択を強制
-	•	娯楽モードでは 5/10/15 分タイマー＋終了後の検索禁止モードを自動適用
-	•	モードインジケーターで現在のモードや残り時間を常時表示
-	•	情報収集モードでは「何を知りたいか」「何のためか」を入力し、所要時間タイマーと完了確認モーダルで振り返りを促す（Notion での整理をリマインド）
-	•	ホーム画面で「今日の目的」を毎日入力させ、入力済みテキストを中央に常時表示（編集ボタンからいつでも更新可能）
-	•	娯楽モードはバッジの「中断」ボタンで終了でき、中断後はホーム画面へ遷移
+	•	再生前にカテゴリ＋理由入力を必須化（最小文字数は設定可能、同じ動画は自動承認）
+	•	入力カテゴリにもとづき 「学習」「娯楽」「その他」 を日別で自動計測
+	•	学習以外／娯楽カテゴリの 1 日上限を任意で設定し、超過時は再生をブロック
+	•	YouTube Shorts の自動ブロック／リダイレクトと関連 UI の非表示
+	•	再生ページのおすすめ欄（サイドバー）を非表示にしてレコメンドを遮断
 	•	PC / モバイル版（m.youtube.com）どちらでも動作
 
 ⸻
@@ -30,6 +23,14 @@ There is English Guide below
 動作要件
 	•	最新の Chromium / Firefox 系ブラウザ
 	•	ユーザースクリプトマネージャ（Tampermonkey, Violentmonkey, Userscripts など）
+
+⸻
+
+追加スクリプト（任意）
+	•	`youtube-extension1.js`: 再生中の時間を右上に表示し、動画が切り替わったら「視聴時間×2 秒」のクールダウンを設定して、その間の再生をブロックするクールダウン専用スクリプト。
+		◦	再生中: 秒数をリアルタイム更新
+		◦	動画遷移時: 直前の視聴秒数×2のクールダウンを開始
+		◦	クールダウン中に再生を試みると即停止し、残り時間を表示
 
 ⸻
 
@@ -44,7 +45,7 @@ There is English Guide below
 	1.	YouTube で動画を開くと 再生前にモーダル が表示されます。
 	2.	カテゴリ（学習／作業／娯楽／その他）と 視聴理由 を入力すると再生が許可されます。
 	3.	同じ動画へ戻った場合は 前回の入力が自動承認 され、すぐ再生できます。
-	4.	画面右上に 当日の視聴時間オーバーレイ が表示されます。 「集計」 ボタンから日別サマリーと直近の理由履歴を確認できます。
+	4.	視聴中はカテゴリ別に自動集計され、設定した上限を超えると再生を停止して警告します。
 	5.	Shorts にアクセスすると、設定に応じて ブロック／リダイレクト されます。
 
 ⸻
@@ -62,9 +63,8 @@ MIN_REASON_LEN	理由入力の最小文字数	5
 MODAL_WIDTH	理由入力モーダルの最大幅（px）	520
 BLOCK_SHORTS	Shorts 動画への遷移をブロックする	true
 HIDE_SHORTS_UI	Shorts 関連のサムネイルやリンクを非表示にする	true
-SHORTS_REDIRECT_URL	Shorts アクセス時のリダイレクト先（空文字でモーダル表示）	“/feed/subscriptions”
-SHOW_WATCH_OVERLAY	右上の視聴時間オーバーレイを表示する	true
-ENABLE_SUMMARY_PANEL	集計パネル（履歴テーブル）を有効にする	true
+SHORTS_REDIRECT_URL	Shorts アクセス時のリダイレクト先（空文字でモーダル表示）	"/feed/subscriptions"
+HIDE_RECOMMENDATIONS	再生ページのおすすめ欄（サイドバー）を隠す	true
 
 設定変更後はスクリプトを保存し、YouTube を再読み込みすると反映されます。
 
@@ -78,16 +78,12 @@ ENABLE_SUMMARY_PANEL	集計パネル（履歴テーブル）を有効にする	t
 yt_reason_store_v1	動画ごとの入力理由とカテゴリ、記録時刻、URL
 yt_reason_daily_v1	日別の視聴時間（合計／学習／娯楽／その他）
 yt_reason_approved_v1	再入力を省略してよい動画の承認フラグ
-fg_mode_on_search_v1	検索モード選択・娯楽タイマー・検索禁止の状態を保持
-fg_daily_purpose_v1	ホーム画面で入力した当日の目的テキスト
 
 リセット したい場合は、ブラウザの開発者ツールで以下を実行するか、該当ドメインのローカルストレージを削除してください。
 
 localStorage.removeItem('yt_reason_store_v1');
 localStorage.removeItem('yt_reason_daily_v1');
 localStorage.removeItem('yt_reason_approved_v1');
-localStorage.removeItem('fg_mode_on_search_v1');
-localStorage.removeItem('fg_daily_purpose_v1');
 
 
 ⸻
@@ -134,19 +130,11 @@ localStorage.removeItem('fg_daily_purpose_v1');
 ⸻
 
 更新履歴
-	•	2025/10/15
-		◦	検索バーでモード選択を必須化し、娯楽モードに視聴タイマーと検索禁止モードを追加
-		◦	娯楽モード中の強制ホーム遷移ガードを廃止し、通常のナビゲーションを維持
-		◦	ホーム画面で「今日の目的」を強制入力させ、入力済みテキストを中央表示＆編集ボタンで更新可能に
-		◦	娯楽モードの残り時間バッジに中断ボタンを追加し、中断後はホームへ自動遷移
-		◦	情報収集モードに目的入力・タイマー・完了確認モーダル・Notion メモ促しを追加し、モードインジケーターで状況を可視化
-	•	2025/11/15
-		◦	検索モードモーダルの選択肢から「情報収集」を削除し、学習か娯楽のいずれかに集中できるよう仕様を簡素化
-		◦	娯楽モードの残り時間バッジから「中断」ボタンを撤去し、設定した時間までは観続けず待つ運用に統一
-		◦	iPad 向けスクリプト（youtube_reason.forIpad.js）を追加し、検索バーを全面非表示 & Subscriptions タブの表示動画/チャンネルを最新3件だけに制限
-	•	2025/11/19
-		◦	iPad 版でホームアイコン／ロゴを完全に隠し、ホームへのリンクをすべて無効化
-		◦	https://www.youtube.com/ へアクセスした際は常に /feed/subscriptions へリダイレクトする強制遷移を追加
+	•	2025/11/20
+		◦	機能をスリム化し、オーバーレイや集計パネル、検索モード・ホーム目的入力などを削除。再生前の理由入力＋時間上限＋Shorts/おすすめ非表示の基本セットに統一
+		◦	`youtube-extension1.js` を追加（視聴時間×2のクールダウン機能、再生/クールダウン時間のオーバーレイ表示）
+	•	2025/09/22
+		◦	初版リリース（再生前理由入力、学習/非学習の計測、Shorts ブロックを実装）
 
 ⸻
 
@@ -173,19 +161,12 @@ A userscript designed to encourage purposeful viewing on YouTube. Before playing
 ⸻
 
 Key Features
-	•	Mandatory category + reason input before playback (minimum character length configurable)
-	•	Automatically tracks watch time by category (Learning / Entertainment / Other) on a daily basis
-	•	Overlay showing daily total watch time and a summary panel listing history and reasons
-	•	Ability to set a daily time cap for non-learning categories, blocking playback once exceeded
-	•	Block/redirect YouTube Shorts and hide related UI elements
-	•	Completely hide the Home icons/logos and force any visit to https://www.youtube.com/ to redirect to /feed/subscriptions
-	•	Force-select a viewing mode (Learning / Leisure / Research) whenever the search bar is focused
-	•	Start a 5/10/15 minute leisure timer and trigger a search-ban cooldown once the timer ends
-	•	Show a persistent mode indicator with the active mode and remaining timers
-	•	For Research mode, capture “what to learn” and “why,” run a focused timer, then ask if the task was accomplished and remind you to summarise in Notion
-	•	On the home feed, require a daily purpose entry, keep the saved text centered, and provide an edit button
-	•	Allow cancelling leisure mode from its badge, automatically returning to the home feed
-	•	Works on both PC and mobile (m.youtube.com)
+	•	Mandatory category + reason input before playback (minimum length configurable; repeat views auto-approved)
+	•	Automatically tracks daily watch time by category (Learning / Entertainment / Other)
+	•	Optional daily caps for non-learning and entertainment; playback is blocked when limits are exceeded
+	•	Block/redirect YouTube Shorts and hide Shorts-related UI
+	•	Hide the recommendations sidebar on the watch page to avoid distractions
+	•	Works on both desktop and mobile (m.youtube.com)
 
 ⸻
 
@@ -206,7 +187,7 @@ Usage
 	1.	When opening a YouTube video, a modal appears before playback.
 	2.	Select a category (Learning / Work / Entertainment / Other) and enter a reason to continue.
 	3.	Returning to the same video will auto-approve the previous input and play immediately.
-	4.	A watch time overlay appears at the top-right showing the day’s total. Use the “Summary” button to view daily totals and recent reason history.
+	4.	Watch time is tracked by category; if a configured cap is exceeded, playback is paused and a warning modal appears.
 	5.	When accessing Shorts, the script will block or redirect depending on configuration.
 
 ⸻
@@ -224,9 +205,8 @@ MIN_REASON_LEN	Minimum character length for input reasons	5
 MODAL_WIDTH	Maximum width (px) of the input modal	520
 BLOCK_SHORTS	Block navigation to Shorts	true
 HIDE_SHORTS_UI	Hide Shorts-related thumbnails and links	true
-SHORTS_REDIRECT_URL	Redirect URL when accessing Shorts (empty = show modal)	“/feed/subscriptions”
-SHOW_WATCH_OVERLAY	Show watch time overlay in the top-right corner	true
-ENABLE_SUMMARY_PANEL	Enable summary panel (history table)	true
+SHORTS_REDIRECT_URL	Redirect URL when accessing Shorts (empty = show modal)	"/feed/subscriptions"
+HIDE_RECOMMENDATIONS	Hide the watch-page recommendations sidebar	true
 
 After editing, save the script and reload YouTube to apply changes.
 
@@ -240,27 +220,21 @@ Key	Content
 yt_reason_store_v1	Reason + category per video, timestamp, URL
 yt_reason_daily_v1	Daily watch time (total / learning / others)
 yt_reason_approved_v1	Approval flag to skip re-entering for videos
-fg_mode_on_search_v1	Mode-selection state, leisure timer, and search-ban cooldown
-fg_daily_purpose_v1	Daily purpose text captured on the home feed
 
 Resetting: Use developer tools to clear specific keys or remove YouTube’s localStorage entirely.
 
 localStorage.removeItem('yt_reason_store_v1');
 localStorage.removeItem('yt_reason_daily_v1');
 localStorage.removeItem('yt_reason_approved_v1');
-localStorage.removeItem('fg_mode_on_search_v1');
-localStorage.removeItem('fg_daily_purpose_v1');
 
 
 ⸻
 
 Changelog
-	•	2025/10/15
-		◦	Enforced mode selection on search focus with leisure timers and search-ban cooldown
-		◦	Removed the forced redirection to home when leisure-mode videos end or leave `/watch`
-		◦	Required a daily purpose entry on the home feed, centered it, and added an edit button for updates
-		◦	Added a cancel button to the leisure timer badge that stops the session and returns to home
-		◦	Expanded Research mode with goal capture, focused timers, completion check modal, and Notion follow-up prompt, plus a persistent mode indicator
+	•	2025/11/20
+		◦	Simplified to core features: reason modal, category tracking with optional limits, Shorts blocking, and hiding recommendations. Removed overlays, summary panel, search modes, daily purpose, and related UI.
+	•	2025/09/22
+		◦	Initial release (reason-before-playback, learning/non-learning tracking, Shorts blocking)
 
 ⸻
 
